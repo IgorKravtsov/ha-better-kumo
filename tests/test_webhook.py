@@ -282,3 +282,35 @@ async def test_held_body_older_than_a_poll_is_not_applied(
         await hass.async_block_till_done(wait_background_tasks=True)
     assert receiver.seq == 1
     assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
+
+
+@pytest.mark.parametrize("kind", ["desktop", "disconnected"])
+async def test_held_body_newer_than_a_slow_poll_is_applied(
+    hass: HomeAssistant, post, config_entry: MockConfigEntry, kind: str
+) -> None:
+    receiver = config_entry.runtime_data.receiver
+    coordinator = config_entry.runtime_data
+    poll_read, poll_gate, boot_gate = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def slow_desktop() -> dict[str, Any]:
+        poll_read.set()
+        await poll_gate.wait()
+        return desktop_state(inCall=False)
+
+    async def slow_boot() -> str:
+        await boot_gate.wait()
+        return "b1"
+
+    with (
+        patch.object(coordinator.client, "desktop", side_effect=slow_desktop),
+        patch.object(coordinator.client, "boot", side_effect=slow_boot),
+    ):
+        poll = hass.async_create_task(coordinator.async_refresh())
+        await poll_read.wait()
+        receiver.handle_payload("b1", 1, kind, {"desktop": desktop_state(inCall=True)})
+        poll_gate.set()
+        await poll
+        boot_gate.set()
+        await hass.async_block_till_done(wait_background_tasks=True)
+    expected = "on" if kind == "desktop" else STATE_UNAVAILABLE
+    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == expected

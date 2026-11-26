@@ -196,7 +196,7 @@ class WebhookReceiver:
         # running one or the last in-flight body of a process that already stopped.
         held = self._held.get(boot)
         if held is None or seq > held[0]:
-            self._held[boot] = (seq, kind, payload, self.coordinator.polls)
+            self._held[boot] = (seq, kind, payload, self.coordinator.polls_started)
         if self._boot_check is None or self._boot_check.done():
             self._boot_check = self.entry.async_create_background_task(
                 self.hass, self._async_check_boot(), "better_kumo boot check"
@@ -223,8 +223,8 @@ class WebhookReceiver:
                     )
             if (body := held.get(current)) and body[0] > self.seq:
                 self.seq = body[0]
-                # A poll that finished while the boot was checked read a newer state than this body.
-                if body[3] == self.coordinator.polls:
+                # A poll that started after this body arrived and has applied read a newer state.
+                if self.coordinator.applied_poll <= body[3]:
                     self._apply(body[1], body[2])
 
     @callback
