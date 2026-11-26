@@ -29,13 +29,29 @@ def parse_pairing_link(link: str) -> tuple[str, str]:
     secret = query.get("secret", [""])[0].strip()
     if not url or not secret:
         raise ValueError("pairing link without url or secret")
-    return normalize_url(url), secret
+    return normalize_url(url), check_secret(secret)
+
+
+def check_secret(secret: str) -> str:
+    """Reject secrets that cannot go into an HTTP header."""
+    secret = secret.strip()
+    if not secret or any(ord(c) < 0x20 or ord(c) == 0x7F for c in secret):
+        raise ValueError("invalid secret")
+    return secret
 
 
 def normalize_url(url: str) -> str:
     """Return the relay base URL without a trailing slash; reject non-HTTP URLs."""
     url = url.strip().rstrip("/")
-    if urlsplit(url).scheme not in ("http", "https") or not urlsplit(url).netloc:
+    parts = urlsplit(url)
+    # Endpoint paths are appended to this string, so a query or fragment would swallow them.
+    if (
+        parts.scheme not in ("http", "https")
+        or not parts.hostname
+        or parts.username is not None
+        or parts.query
+        or parts.fragment
+    ):
         raise ValueError("relay URL must be http(s)://host:port")
     return url
 
@@ -56,30 +72,38 @@ class RelayClient:
                 json=body,
                 headers=self._headers,
                 timeout=TIMEOUT,
+                # A redirect would resend the body, which can carry the webhook secret.
+                allow_redirects=False,
             ) as resp:
                 if resp.status == 401:
                     raise RelayAuthError("wrong relay secret")
                 text = await resp.text()
-                if resp.status >= 400:
-                    raise RelayError(f"relay returned {resp.status}: {text.strip()}")
-        except (aiohttp.ClientError, TimeoutError) as err:
+                if resp.status >= 300:
+                    raise RelayError(f"relay returned {resp.status}: {text.strip()[:200]}")
+        except (aiohttp.ClientError, TimeoutError, UnicodeDecodeError) as err:
             raise RelayError(f"relay not reachable: {err}") from err
         try:
             return json.loads(text) if text.strip() else None
         except ValueError as err:
             raise RelayError(f"unexpected reply from the relay: {err}") from err
 
+    async def _object(self, method: str, path: str, body: Any = None) -> dict[str, Any]:
+        reply = await self._request(method, path, body)
+        if not isinstance(reply, dict):
+            raise RelayError("unexpected reply from the relay: not a JSON object")
+        return reply
+
     async def status(self) -> dict[str, Any]:
         """GET /v1/status."""
-        return await self._request("GET", "/v1/status")
+        return await self._object("GET", "/v1/status")
 
     async def desktop(self) -> dict[str, Any]:
         """GET /v1/desktop."""
-        return await self._request("GET", "/v1/desktop")
+        return await self._object("GET", "/v1/desktop")
 
     async def set_availability(self, availability: str, message: str) -> dict[str, Any]:
         """POST /v1/desktop/status."""
-        return await self._request(
+        return await self._object(
             "POST",
             "/v1/desktop/status",
             {"availability": availability, "message": message},
@@ -87,7 +111,7 @@ class RelayClient:
 
     async def set_media(self, **media: bool) -> dict[str, Any]:
         """POST /v1/desktop/media with audio= and/or video=."""
-        return await self._request("POST", "/v1/desktop/media", media)
+        return await self._object("POST", "/v1/desktop/media", media)
 
     async def put_webhook(self, hook_id: str, urls: list[str], secret: str) -> None:
         """PUT /v1/webhooks/{id}."""

@@ -12,6 +12,8 @@ from .coordinator import BetterKumoConfigEntry
 from .webhook import webhook_urls
 
 TO_REDACT = {CONF_SECRET, CONF_WEBHOOK_SECRET}
+# Coworkers' names and status messages are not needed to debug the integration.
+DESKTOP_REDACT = {"name", "message", "avatar", "uid"}
 
 
 async def async_get_config_entry_diagnostics(
@@ -34,5 +36,7 @@ async def async_get_config_entry_diagnostics(
         },
         "last_update_success": coordinator.last_update_success,
         "last_error": str(coordinator.last_exception) if coordinator.last_exception else None,
-        "desktop": coordinator.data,
+        "desktop": async_redact_data(coordinator.data, DESKTOP_REDACT)
+        if coordinator.data
+        else None,
     }

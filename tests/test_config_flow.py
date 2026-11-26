@@ -37,6 +37,9 @@ def test_parse_pairing_link() -> None:
         "kumowatch://relay?secret=y",
         "kumowatch://relay?url=ftp%3A%2F%2Fh&secret=y",
         "kumowatch://other?url=http%3A%2F%2Fh%3A1&secret=y",
+        "kumowatch://relay?url=http%3A%2F%2Fh%3A1%2F%3Fq%3D1&secret=y",
+        "kumowatch://relay?url=http%3A%2F%2Fu%3Ap%40h%3A1&secret=y",
+        "kumowatch://relay?url=http%3A%2F%2Fh%3A1&secret=a%0D%0Ab",
     ],
 )
 def test_parse_pairing_link_rejects(link: str) -> None:
@@ -85,6 +88,10 @@ async def test_pair_with_url_and_secret(
         ({CONF_URL: RELAY}, "missing_input"),
         ({"link": "https://example.com"}, "invalid_link"),
         ({CONF_URL: "kumo-mac.local:8787", CONF_SECRET: SECRET}, "invalid_url"),
+        ({CONF_URL: RELAY + "/#x", CONF_SECRET: SECRET}, "invalid_url"),
+        ({CONF_URL: RELAY, CONF_SECRET: "   "}, "missing_input"),
+        ({"link": "   ", CONF_URL: "nope", CONF_SECRET: SECRET}, "invalid_url"),
+        ({CONF_URL: RELAY, CONF_SECRET: "a\x01b"}, "invalid_secret"),
     ],
 )
 async def test_input_errors(hass: HomeAssistant, user_input: dict, error: str) -> None:
@@ -96,7 +103,12 @@ async def test_input_errors(hass: HomeAssistant, user_input: dict, error: str) -
 
 @pytest.mark.parametrize(
     ("mock", "error"),
-    [({"status": 401}, "invalid_auth"), ({"exc": TimeoutError()}, "cannot_connect")],
+    [
+        ({"status": 401}, "invalid_auth"),
+        ({"exc": TimeoutError()}, "cannot_connect"),
+        ({"json": ["not", "an", "object"]}, "cannot_connect"),
+        ({"status": 307, "headers": {"Location": "https://example.com/"}}, "cannot_connect"),
+    ],
 )
 async def test_relay_errors(
     hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, mock: dict, error: str

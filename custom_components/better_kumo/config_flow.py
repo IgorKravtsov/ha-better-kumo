@@ -24,7 +24,14 @@ from homeassistant.helpers.selector import (
 )
 import voluptuous as vol
 
-from .api import RelayAuthError, RelayClient, RelayError, normalize_url, parse_pairing_link
+from .api import (
+    RelayAuthError,
+    RelayClient,
+    RelayError,
+    check_secret,
+    normalize_url,
+    parse_pairing_link,
+)
 from .const import (
     CONF_LINK,
     CONF_POLL_INTERVAL,
@@ -40,11 +47,33 @@ from .coordinator import BetterKumoConfigEntry
 
 USER_SCHEMA = vol.Schema(
     {
-        vol.Optional(CONF_LINK): TextSelector(),
+        vol.Optional(CONF_LINK): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
         vol.Optional(CONF_URL): TextSelector(TextSelectorConfig(type=TextSelectorType.URL)),
         vol.Optional(CONF_SECRET): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
     }
 )
+
+
+def _pairing(user_input: dict[str, Any]) -> tuple[str, str] | str:
+    """Return (url, secret) from the form, or an error key."""
+    link = user_input.get(CONF_LINK, "").strip()
+    url = user_input.get(CONF_URL, "").strip()
+    secret = user_input.get(CONF_SECRET, "").strip()
+    if link:
+        try:
+            return parse_pairing_link(link)
+        except ValueError:
+            return "invalid_link"
+    if not url or not secret:
+        return "missing_input"
+    try:
+        url = normalize_url(url)
+    except ValueError:
+        return "invalid_url"
+    try:
+        return url, check_secret(secret)
+    except ValueError:
+        return "invalid_secret"
 
 
 class BetterKumoConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -56,19 +85,11 @@ class BetterKumoConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle the only step."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            try:
-                if link := user_input.get(CONF_LINK, "").strip():
-                    url, secret = parse_pairing_link(link)
-                elif user_input.get(CONF_URL) and user_input.get(CONF_SECRET):
-                    url = normalize_url(user_input[CONF_URL])
-                    secret = user_input[CONF_SECRET].strip()
-                else:
-                    raise LookupError
-            except LookupError:
-                errors["base"] = "missing_input"
-            except ValueError:
-                errors["base"] = "invalid_link" if user_input.get(CONF_LINK) else "invalid_url"
+            parsed = _pairing(user_input)
+            if isinstance(parsed, str):
+                errors["base"] = parsed
             else:
+                url, secret = parsed
                 client = RelayClient(async_get_clientsession(self.hass), url, secret)
                 try:
                     status = await client.status()
@@ -94,7 +115,9 @@ class BetterKumoConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
         return self.async_show_form(
             step_id="user",
-            data_schema=self.add_suggested_values_to_schema(USER_SCHEMA, user_input),
+            data_schema=self.add_suggested_values_to_schema(
+                USER_SCHEMA, {CONF_URL: (user_input or {}).get(CONF_URL)}
+            ),
             errors=errors,
         )
 

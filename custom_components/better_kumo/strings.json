@@ -20,7 +20,8 @@
       "invalid_link": "This is not a Better Kumo pairing link.",
       "invalid_url": "Enter a full URL that starts with http or https.",
       "invalid_auth": "The relay rejected the secret.",
-      "cannot_connect": "Could not reach the relay."
+      "cannot_connect": "Could not reach the relay.",
+      "invalid_secret": "The secret contains characters that are not allowed."
     },
     "abort": {
       "already_configured": "This Kumospace account is already set up; its address and secret were updated."

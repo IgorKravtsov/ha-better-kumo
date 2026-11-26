@@ -76,7 +76,7 @@ temporary scene and sets the color. When both have been off for the delay, it re
 
 ```sh
 uv venv -p 3.14 .venv
-uv pip install -p .venv -r requirements_test.txt ruff
+uv pip install -p .venv -r requirements_test.txt
 .venv/bin/pytest
 .venv/bin/ruff check . && .venv/bin/ruff format --check .
 ```

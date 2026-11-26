@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from homeassistant.const import CONF_URL, CONF_WEBHOOK_ID
@@ -71,11 +70,14 @@ def config_entry() -> MockConfigEntry:
 
 
 @pytest.fixture
-def relay(aioclient_mock: AiohttpClientMocker) -> AiohttpClientMocker:
+def relay(
+    aioclient_mock: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> AiohttpClientMocker:
     """A healthy relay."""
     aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
-    aioclient_mock.put(re.compile(r"/v1/webhooks/"), status=204)
-    aioclient_mock.delete(re.compile(r"/v1/webhooks/"), status=204)
+    hook = f"{RELAY}/v1/webhooks/{config_entry.entry_id}"
+    aioclient_mock.put(hook, status=204)
+    aioclient_mock.delete(hook, status=204)
     return aioclient_mock
 
 

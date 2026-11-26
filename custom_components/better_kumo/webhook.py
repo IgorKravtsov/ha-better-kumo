@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import contextlib
 import hashlib
 import hmac
@@ -35,8 +36,9 @@ def valid_signature(secret: str, body: bytes, header: str | None) -> bool:
     """Check X-Kumo-Signature: sha256=<hex HMAC-SHA256 of the raw body>."""
     if not header or not header.startswith("sha256="):
         return False
-    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, header.removeprefix("sha256=").lower())
+    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest().encode()
+    given = header.removeprefix("sha256=").lower().encode("utf-8", "replace")
+    return hmac.compare_digest(expected, given)
 
 
 def webhook_urls(hass: HomeAssistant, entry: BetterKumoConfigEntry) -> list[str]:
@@ -75,6 +77,7 @@ class WebhookReceiver:
         self.coordinator = coordinator
         self.boot: str | None = None
         self._retired_boots: set[str] = set()
+        self._fired_events: deque[tuple[str, int]] = deque(maxlen=256)
         self._lock = asyncio.Lock()
         self._closed = False
         self.seq = -1
@@ -153,6 +156,8 @@ class WebhookReceiver:
             boot = str(payload["boot"])
             seq = int(payload["seq"])
             kind = payload["kind"]
+            if kind in ("desktop", "event") and not isinstance(payload[kind], dict):
+                raise TypeError
         except (ValueError, KeyError, TypeError):
             return web.Response(status=HTTPStatus.BAD_REQUEST)
         self.handle_payload(boot, seq, kind, payload)
@@ -162,9 +167,12 @@ class WebhookReceiver:
     def handle_payload(self, boot: str, seq: int, kind: str, payload: dict[str, Any]) -> None:
         """Apply one verified delivery."""
         if kind == "event":
+            # The relay may deliver one body to a second URL when the first answered too late.
+            if (boot, seq) in self._fired_events:
+                return
+            self._fired_events.append((boot, seq))
             self.hass.bus.async_fire(
-                EVENT_BETTER_KUMO,
-                {**payload.get("event", {}), "config_entry_id": self.entry.entry_id},
+                EVENT_BETTER_KUMO, {**payload["event"], "config_entry_id": self.entry.entry_id}
             )
             return
         if kind not in ("desktop", "disconnected"):
@@ -175,7 +183,7 @@ class WebhookReceiver:
         if self.boot is not None and boot != self.boot:
             self._retired_boots.add(self.boot)
         self.boot, self.seq = boot, seq
-        if kind == "desktop" and isinstance(payload.get("desktop"), dict):
+        if kind == "desktop":
             self.coordinator.async_apply(payload["desktop"])
         elif kind == "disconnected":
             self.coordinator.async_mark_disconnected()

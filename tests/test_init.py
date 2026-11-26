@@ -176,6 +176,8 @@ async def test_diagnostics_redacts_secrets(
     assert WEBHOOK_SECRET not in text
     assert diag["webhook"]["urls"] == ["http://homeassistant.local:8123/api/webhook/hook-1"]
     assert diag["desktop"]["self"]["zoneId"] == "z1"
+    assert "Alice" not in text
+    assert "hi" not in str(diag["desktop"]["self"])
 
 
 async def test_poll_older_than_disconnect_push_is_ignored(

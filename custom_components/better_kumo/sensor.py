@@ -58,6 +58,8 @@ class RoomSensor(BetterKumoEntity, SensorEntity):
 class EarshotCountSensor(BetterKumoEntity, SensorEntity):
     """How many people I currently hear."""
 
+    _unrecorded_attributes = frozenset({"names"})
+
     @property
     def native_value(self) -> int | None:
         """Return the count, or None on a relay without earshot."""

@@ -50,6 +50,7 @@ def test_valid_signature() -> None:
     assert not valid_signature(WEBHOOK_SECRET, body, sign(body, "other"))
     assert not valid_signature(WEBHOOK_SECRET, body, sign(body).removeprefix("sha256="))
     assert not valid_signature(WEBHOOK_SECRET, body, None)
+    assert not valid_signature(WEBHOOK_SECRET, body, "sha256=\u00fc" * 8)
 
 
 async def test_desktop_push(hass: HomeAssistant, post) -> None:
@@ -94,8 +95,32 @@ async def test_event_fires_on_the_bus(
     assert events[0].data == {**event, "config_entry_id": config_entry.entry_id}
 
 
-async def test_malformed_body(hass: HomeAssistant, post) -> None:
-    assert await post({"seq": 1}) == 400
+async def test_duplicate_event_fires_once(hass: HomeAssistant, post) -> None:
+    events = async_capture_events(hass, EVENT_BETTER_KUMO)
+    payload = {"boot": "b1", "seq": 3, "kind": "event", "event": {"kind": "nudge"}}
+    await post(payload)
+    await post(payload)
+    assert len(events) == 1
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"seq": 1},
+        {"boot": "b1", "seq": 1, "kind": "desktop"},
+        {"boot": "b1", "seq": 1, "kind": "desktop", "desktop": []},
+        {"boot": "b1", "seq": 1, "kind": "event", "event": "x"},
+    ],
+)
+async def test_malformed_body(hass: HomeAssistant, post, payload: dict) -> None:
+    assert await post(payload) == 400
+    # A rejected body must not advance the watermark.
+    await post({"boot": "b1", "seq": 1, "kind": "desktop", "desktop": desktop_state(inCall=True)})
+    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
+
+
+async def test_non_ascii_signature(hass: HomeAssistant, post) -> None:
+    assert await post({"boot": "b1", "seq": 1, "kind": "disconnected"}, "sha256=ü") == 401
 
 
 def _put_urls(relay: AiohttpClientMocker) -> list[str]:

@@ -20,7 +20,8 @@
       "invalid_link": "Це не посилання для підключення Better Kumo.",
       "invalid_url": "Введіть повну адресу, що починається з http або https.",
       "invalid_auth": "Relay не прийняв секрет.",
-      "cannot_connect": "Не вдалося підключитися до relay."
+      "cannot_connect": "Не вдалося підключитися до relay.",
+      "invalid_secret": "Секрет містить неприпустимі символи."
     },
     "abort": {
       "already_configured": "Цей акаунт Kumospace вже додано; адресу й секрет оновлено."
