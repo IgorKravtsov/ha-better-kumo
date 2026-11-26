@@ -71,8 +71,9 @@ async def test_stale_seq_is_dropped(hass: HomeAssistant, post) -> None:
             {"boot": "b1", "seq": seq, "kind": "desktop", "desktop": desktop_state(inCall=False)}
         )
         assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
-    # A relay restart starts a new boot with a low seq.
     await post({"boot": "b2", "seq": 1, "kind": "desktop", "desktop": desktop_state(inCall=False)})
+    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
+    await post({"boot": "b1", "seq": 9, "kind": "desktop", "desktop": desktop_state(inCall=True)})
     assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
 
 
@@ -126,7 +127,6 @@ async def test_registration_url_order(
 async def test_registration_falls_back_to_local_ip(
     hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
 ) -> None:
-    # No internal_url configured: the http component's detected LAN IP is used.
     await setup_entry(hass, config_entry)
     api = hass.config.api
     assert _put_urls(relay) == [f"http://{api.local_ip}:{api.port}{PATH}"]

@@ -39,13 +39,23 @@ class BetterKumoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
         )
         self.client = client
+        self._generation = 0
         self.receiver: WebhookReceiver | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
+        generation = self._generation
         try:
-            return await self.client.desktop()
+            data = await self.client.desktop()
         except RelayError as err:
+            if generation != self._generation and self.last_update_success:
+                return self.data
             raise UpdateFailed(str(err)) from err
+        # A push or command landed while this poll was in flight; it is newer.
+        if generation != self._generation:
+            if not self.last_update_success:
+                raise UpdateFailed(str(self.last_exception))
+            return self.data
+        return data
 
     @callback
     def async_apply(self, data: dict[str, Any]) -> None:
@@ -54,6 +64,7 @@ class BetterKumoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Unlike async_set_updated_data this keeps the poll timer running, so polling
         stays on its schedule even while pushes arrive.
         """
+        self._generation += 1
         self.data = data
         self.last_update_success = True
         self.last_exception = None
@@ -62,6 +73,7 @@ class BetterKumoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @callback
     def async_mark_disconnected(self) -> None:
         """Make entities unavailable until the next good poll or push."""
+        self._generation += 1
         if self.last_update_success:
             _LOGGER.info("Kumospace desktop disconnected from the relay")
         self.last_update_success = False

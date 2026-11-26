@@ -38,10 +38,12 @@ blueprint:
 
 mode: queued
 
-variables:
-  light_entity: !input light
+trigger_variables:
   in_call_entity: !input in_call
   earshot_entity: !input earshot
+
+variables:
+  light_entity: !input light
   scene_id: "better_kumo_{{ light_entity | replace('.', '_') }}"
   scene_entity: "scene.{{ scene_id }}"
 
@@ -53,7 +55,7 @@ triggers:
   - trigger: template
     id: quiet
     value_template: >-
-      {{ not is_state(in_call_entity, 'on') and not is_state(earshot_entity, 'on') }}
+      {{ is_state(in_call_entity, 'off') and is_state(earshot_entity, 'off') }}
     for: !input off_delay
 
 actions:

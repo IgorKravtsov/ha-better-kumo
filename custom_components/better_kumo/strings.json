@@ -11,14 +11,14 @@
         },
         "data_description": {
           "link": "kumowatch://relay?url=…&secret=…",
-          "url": "For example http://kumo-mac.local:8787. A Tailscale address keeps working when the computer is away from home."
+          "url": "A Tailscale address keeps working when the computer is away from home."
         }
       }
     },
     "error": {
       "missing_input": "Paste a pairing link, or enter both the relay URL and the secret.",
       "invalid_link": "This is not a Better Kumo pairing link.",
-      "invalid_url": "Enter an http:// or https:// URL.",
+      "invalid_url": "Enter a full URL that starts with http or https.",
       "invalid_auth": "The relay rejected the secret.",
       "cannot_connect": "Could not reach the relay."
     },
@@ -35,12 +35,12 @@
         },
         "data_description": {
           "poll_interval": "How often to read the state from the relay, in seconds (1–3600). Polling runs even when webhooks work.",
-          "webhook_url": "Optional. Tried first by the relay, before the internal and external URLs of Home Assistant. For example https://ha.example.com."
+          "webhook_url": "Optional. Tried first by the relay, before the internal and external URLs of Home Assistant."
         }
       }
     },
     "error": {
-      "invalid_url": "Enter an http:// or https:// URL."
+      "invalid_url": "Enter a full URL that starts with http or https."
     }
   },
   "entity": {

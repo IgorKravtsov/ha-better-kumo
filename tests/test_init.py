@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
+from unittest.mock import patch
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE
@@ -16,6 +18,7 @@ from pytest_homeassistant_custom_component.components.diagnostics import (
 )
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
+from custom_components.better_kumo.api import RelayError
 from custom_components.better_kumo.const import CONF_POLL_INTERVAL
 
 from .conftest import RELAY, SECRET, WEBHOOK_SECRET, desktop_state, setup_entry
@@ -173,3 +176,93 @@ async def test_diagnostics_redacts_secrets(
     assert WEBHOOK_SECRET not in text
     assert diag["webhook"]["urls"] == ["http://homeassistant.local:8123/api/webhook/hook-1"]
     assert diag["desktop"]["self"]["zoneId"] == "z1"
+
+
+async def test_poll_older_than_disconnect_push_is_ignored(
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    await setup_entry(hass, config_entry)
+    coordinator = config_entry.runtime_data
+    gate = asyncio.Event()
+
+    async def slow_desktop():
+        await gate.wait()
+        return desktop_state()
+
+    with patch.object(coordinator.client, "desktop", side_effect=slow_desktop):
+        task = hass.async_create_task(coordinator.async_refresh())
+        await asyncio.sleep(0)
+        coordinator.async_mark_disconnected()
+        gate.set()
+        await task
+    assert hass.states.get("sensor.kumospace_status").state == STATE_UNAVAILABLE
+
+
+async def test_poll_failure_older_than_push_is_ignored(
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    await setup_entry(hass, config_entry)
+    coordinator = config_entry.runtime_data
+    gate = asyncio.Event()
+
+    async def slow_failure():
+        await gate.wait()
+        raise RelayError("relay not reachable")
+
+    with patch.object(coordinator.client, "desktop", side_effect=slow_failure):
+        task = hass.async_create_task(coordinator.async_refresh())
+        await asyncio.sleep(0)
+        coordinator.async_apply(desktop_state(inCall=True))
+        gate.set()
+        await task
+    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
+
+
+async def test_poll_older_than_command_keeps_command_state(
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    await setup_entry(hass, config_entry)
+    coordinator = config_entry.runtime_data
+    gate = asyncio.Event()
+
+    async def slow_desktop():
+        await gate.wait()
+        return desktop_state(audio=True)
+
+    with patch.object(coordinator.client, "desktop", side_effect=slow_desktop):
+        task = hass.async_create_task(coordinator.async_refresh())
+        await asyncio.sleep(0)
+        coordinator.async_apply(desktop_state(audio=False))
+        gate.set()
+        await task
+    assert hass.states.get("switch.kumospace_microphone").state == "off"
+
+
+async def test_unload_waits_for_inflight_registration(
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    await setup_entry(hass, config_entry)
+    receiver = config_entry.runtime_data.receiver
+    gate = asyncio.Event()
+    order: list[str] = []
+
+    async def slow_put(*args):
+        await gate.wait()
+        order.append("put")
+
+    async def delete(*args):
+        order.append("delete")
+
+    with (
+        patch.object(receiver.coordinator.client, "put_webhook", side_effect=slow_put),
+        patch.object(receiver.coordinator.client, "delete_webhook", side_effect=delete),
+    ):
+        register = hass.async_create_task(receiver.async_register())
+        await asyncio.sleep(0)
+        unload = hass.async_create_task(hass.config_entries.async_unload(config_entry.entry_id))
+        await asyncio.sleep(0)
+        gate.set()
+        await register
+        assert await unload
+        await receiver.async_register()
+    assert order == ["put", "delete"]

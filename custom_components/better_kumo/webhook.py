@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import hmac
@@ -73,15 +74,16 @@ class WebhookReceiver:
         self.entry = entry
         self.coordinator = coordinator
         self.boot: str | None = None
+        self._retired_boots: set[str] = set()
+        self._lock = asyncio.Lock()
+        self._closed = False
         self.seq = -1
         self.registered_urls: list[str] = []
         self.last_error: str | None = None
 
     async def async_setup(self) -> None:
         """Start receiving and keep the registration in the relay fresh."""
-        # local_only=False: the relay may reach us through an external URL
-        # (ha.example.com behind a proxy) or over Tailscale (100.64/10), neither of
-        # which HA counts as local. Every body is authenticated by HMAC instead.
+        # External URLs and Tailscale (100.64/10) are not "local" to HA; HMAC authenticates.
         webhook.async_register(
             self.hass,
             DOMAIN,
@@ -106,9 +108,12 @@ class WebhookReceiver:
         """PUT the registration; failures leave polling as the only source."""
         urls = webhook_urls(self.hass, self.entry)
         try:
-            await self.coordinator.client.put_webhook(
-                self.entry.entry_id, urls, self.entry.data[CONF_WEBHOOK_SECRET]
-            )
+            async with self._lock:
+                if self._closed:
+                    return
+                await self.coordinator.client.put_webhook(
+                    self.entry.entry_id, urls, self.entry.data[CONF_WEBHOOK_SECRET]
+                )
         except RelayError as err:
             if self.last_error is None:
                 _LOGGER.warning(
@@ -124,8 +129,11 @@ class WebhookReceiver:
 
     async def async_unregister(self) -> None:
         """DELETE the registration; best effort."""
+        self._closed = True
         try:
-            await self.coordinator.client.delete_webhook(self.entry.entry_id)
+            # The lock makes an in-flight PUT finish first, so it cannot recreate the hook.
+            async with self._lock:
+                await self.coordinator.client.delete_webhook(self.entry.entry_id)
         except RelayError as err:
             _LOGGER.debug("Could not remove the webhook from the relay: %s", err)
 
@@ -161,9 +169,11 @@ class WebhookReceiver:
             return
         if kind not in ("desktop", "disconnected"):
             return
-        if boot == self.boot and seq <= self.seq:
+        if boot in self._retired_boots or (boot == self.boot and seq <= self.seq):
             _LOGGER.debug("Dropped stale %s body %s/%s", kind, boot, seq)
             return
+        if self.boot is not None and boot != self.boot:
+            self._retired_boots.add(self.boot)
         self.boot, self.seq = boot, seq
         if kind == "desktop" and isinstance(payload.get("desktop"), dict):
             self.coordinator.async_apply(payload["desktop"])
