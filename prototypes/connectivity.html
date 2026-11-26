@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PROTOTYPE: Better Kumo ↔ Home Assistant</title>
+<style>
+:root{--bg:var(--background,#fff);--fg:var(--foreground,#111);--mut:var(--muted-foreground,#666);--bd:var(--border,#ddd);--cd:var(--card,#f6f6f6);--ac:var(--primary,#2563eb);--ok:var(--success,#16a34a);--wr:var(--warning,#d97706);--er:var(--destructive,#dc2626);--r:var(--radius,8px)}
+*{box-sizing:border-box}body{font-family:var(--font-sans,system-ui,sans-serif);color:var(--fg);margin:0;font-size:14px;line-height:1.45}
+h2{font-size:15px;margin:18px 0 6px}p{margin:4px 0}.mut{color:var(--mut);font-size:12.5px}
+.box{border:1px solid var(--bd);border-radius:var(--r);padding:14px;margin:8px 0;background:var(--cd)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px}
+.dlg h3{margin:0 0 8px;font-size:14px}.fld{margin:8px 0}.fld label{display:block;font-size:12px;color:var(--mut)}
+.fld .in{border:1px solid var(--bd);border-radius:6px;padding:6px 8px;font-family:var(--font-mono,monospace);font-size:12.5px;background:var(--bg);word-break:break-all}
+.ctl{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0}.ctl b{min-width:170px;font-weight:500}
+button{font:inherit;font-size:12.5px;border:1px solid var(--bd);background:var(--bg);color:var(--fg);border-radius:6px;padding:4px 9px;cursor:pointer}
+button.on{border-color:var(--ac);background:var(--ac);color:var(--primary-foreground,#fff)}
+.res{display:grid;grid-template-columns:auto 1fr;gap:4px 12px}.res div:nth-child(odd){color:var(--mut)}
+.ok{color:var(--ok)}.wr{color:var(--wr)}.er{color:var(--er)}
+.verdict{font-size:15px;font-weight:600;margin-bottom:6px}.chg{background:color-mix(in srgb,var(--ac) 18%,transparent);border-radius:4px}
+.tabs button{margin-right:4px}.steps button{display:block;margin:4px 0;text-align:left}.steps button.done{opacity:.45}
+</style></head><body>
+<p class="mut">PROTOTYPE, выбросить после решения. Вопрос: <b>куда отправлять webhook и через какой адрес опрашивать relay, чтобы данные шли, когда рабочий Mac дома, вне дома и выключен?</b> Факты из заметок: HA на Pi 4 по адресу <code>http://homeassistant.local</code>, <code>internal_url</code> не задан, <code>external_url</code> = <code>https://ha.example.com</code> (идёт через Traefik на the reverse proxy host, снаружи через VPS). Неизвестно: может ли HA сам дойти до Tailscale-адресов (100.x) через GL.iNet. Для этого есть переключатель.</p>
+
+<h2>1. Как это выглядит в HA</h2>
+<div class="grid">
+ <div class="box dlg"><h3>Добавление: Better Kumo (шаг 1 из 1)</h3>
+  <div class="fld"><label>Адрес relay на рабочем Mac</label><div class="in" id="dRelay"></div></div>
+  <div class="fld"><label>Ссылка сопряжения (Better Kumo → Pair a phone… → Copy link)</label><div class="in">kumowatch://pair?url=…&amp;token=••••••••</div></div>
+  <p class="mut">Если вставить ссылку, адрес relay заполнится сам. При сохранении integration регистрирует webhook в relay и передаёт ему секрет для HMAC.</p></div>
+ <div class="box dlg"><h3>Better Kumo → Настроить (options)</h3>
+  <div class="fld"><label>Интервал опроса, с</label><div class="in" id="dPoll"></div></div>
+  <div class="fld"><label>URL Home Assistant для webhook (пусто = автоматически)</label><div class="in" id="dHook"></div></div>
+  <p class="mut">Подсказка под полем: «Адрес, по которому рабочий Mac достучится до HA. Текущий webhook: <span id="dHookFull"></span>».</p></div>
+</div>
+
+<h2>2. Состояние</h2>
+<div class="box"><div class="verdict" id="verdict"></div><div class="res" id="res"></div></div>
+
+<h2>3. Свободная игра</h2>
+<div class="box" id="free"></div>
+
+<h2>4. Сценарии</h2>
+<div class="box"><div class="tabs" id="tabs"></div><p id="scDesc"></p><div class="steps" id="steps"></div></div>
+
+<script>
+// ---- pure logic (liftable) ----
+const HA_LAN='http://homeassistant.local', HA_EXT='https://ha.example.com', HA_TS='http://100.x.y.z (HA в Tailscale)';
+const init=()=>({mac:'home',kumo:true,relayAddr:'tailscale',haToTailnet:false,hookBase:'auto',proxyServer:true,haInTailscale:false,poll:30});
+function reduce(s,a){return {...s,[a.k]:a.v}}
+function derive(s){
+  const macOn=s.mac!=='off', relayUp=macOn&&s.kumo;
+  const relayUrl=s.relayAddr==='lan'?'http://192.168.1.x:8787 (LAN-адрес Mac)':'http://100.a.b.c:8787 (Tailscale Mac)';
+  const pollOk=relayUp&&(s.relayAddr==='lan'?s.mac==='home':(s.haToTailnet||s.haInTailscale));
+  const base=s.hookBase==='auto'?HA_LAN:s.hookBase==='external'?HA_EXT:HA_TS;
+  let hookOk=relayUp;
+  if(s.hookBase==='auto') hookOk=hookOk&&s.mac==='home';
+  if(s.hookBase==='external') hookOk=hookOk&&s.proxyServer;
+  if(s.hookBase==='tailscale') hookOk=hookOk&&s.haInTailscale;
+  let verdict,cls;
+  if(pollOk&&hookOk){verdict='Всё работает: обновления мгновенно, опрос как подстраховка';cls='ok'}
+  else if(hookOk){verdict='Обновления мгновенно, но команды из HA (статус, mute) не доходят: HA не видит relay';cls='wr'}
+  else if(pollOk){verdict=`Только опрос: обновления с задержкой до ${s.poll} с, команды работают`;cls='wr'}
+  else{verdict='Все сущности unavailable';cls='er'}
+  return {relayUp,relayUrl,pollOk,hookUrl:base+'/api/webhook/bk_••••',hookOk,commandsOk:pollOk,verdict,cls};
+}
+// ---- page ----
+let s=init(),prev=null;
+const L={mac:{home:'дома (LAN)',away:'вне дома',off:'выключен'},relayAddr:{lan:'LAN-адрес Mac',tailscale:'Tailscale-адрес Mac'},hookBase:{auto:'авто (LAN HA)',external:'ha.example.com',tailscale:'Tailscale-адрес HA'}};
+const CTL=[['mac','Рабочий Mac',['home','away','off']],['kumo','Kumospace + Better Kumo запущены',[true,false]],['relayAddr','Адрес relay в настройке',['lan','tailscale']],['haToTailnet','HA доходит до 100.x через GL.iNet',[true,false]],['hookBase','URL для webhook',['auto','external','tailscale']],['proxyServer','reverse proxy включён',[true,false]],['haInTailscale','На HA стоит Tailscale add-on',[true,false]],['poll','Интервал опроса, с',[1,30,300]]];
+const lab=(k,v)=>L[k]?.[v]??(v===true?'да':v===false?'нет':v);
+const yn=b=>b?'<span class="ok">да</span>':'<span class="er">нет</span>';
+function render(){
+  const d=derive(s),p=prev&&derive(prev);
+  document.getElementById('dRelay').textContent=d.relayUrl;
+  document.getElementById('dPoll').textContent=s.poll;
+  document.getElementById('dHook').textContent=s.hookBase==='auto'?'':s.hookBase==='external'?HA_EXT:HA_TS;
+  document.getElementById('dHookFull').textContent=d.hookUrl;
+  const v=document.getElementById('verdict');v.textContent=d.verdict;v.className='verdict '+d.cls;
+  const rows=[['Relay работает',yn(d.relayUp),'relayUp'],['HA → relay (опрос, команды)',yn(d.pollOk),'pollOk'],['Mac → HA (webhook)',yn(d.hookOk),'hookOk'],['Webhook уходит на',d.hookUrl,'hookUrl'],['Relay в HA',d.relayUrl,'relayUrl']];
+  document.getElementById('res').innerHTML=rows.map(([a,b,k])=>`<div>${a}</div><div class="${p&&p[k]!==d[k]?'chg':''}">${b}</div>`).join('');
+  document.getElementById('free').innerHTML=CTL.map(([k,t,vals])=>`<div class="ctl"><b>${t}</b>${vals.map(v=>`<button class="${s[k]===v?'on':''}" onclick='act(${JSON.stringify(k)},${JSON.stringify(v)})'>${lab(k,v)}</button>`).join('')}</div>`).join('');
+}
+function act(k,v){prev=s;s=reduce(s,{k,v});render()}
+const SC=[
+ ['Mac дома, всё по умолчанию','Integration сама берёт LAN-адрес HA. Relay указан по Tailscale, но HA, возможно, не умеет ходить в 100.x. Смотри, что меняется от этого неизвестного.',[['mac','home'],['haToTailnet',false],['haToTailnet',true]]],
+ ['Уехал с ноутбуком','Mac вне дома. LAN-webhook сразу ломается. Переключаем webhook на ha.example.com: он работает, пока включён the reverse proxy host.',[['mac','away'],['hookBase','external'],['proxyServer',false]]],
+ ['Relay указан по LAN','Если в настройке LAN-адрес Mac, то вне дома опрос и команды пропадают, даже если webhook доходит.',[['relayAddr','lan'],['hookBase','external'],['mac','away']]],
+ ['Mac выключен','Relay не работает, ни webhook, ни опрос ничего не дают. Ожидаемо unavailable: это и есть сигнал «я не за компом».',[['mac','off']]],
+];
+let tab=0,step=0;
+function renderSc(){
+  document.getElementById('tabs').innerHTML=SC.map((x,i)=>`<button class="${i===tab?'on':''}" onclick="startSc(${i})">${x[0]}</button>`).join('');
+  document.getElementById('scDesc').textContent=SC[tab][1];
+  document.getElementById('steps').innerHTML=SC[tab][2].map(([k,v],i)=>`<button class="${i<step?'done':''}" ${i!==step?'disabled':''} onclick="doStep()">${i+1}. ${CTL.find(c=>c[0]===k)[1]}: ${lab(k,v)}</button>`).join('');
+}
+function startSc(i){tab=i;step=0;prev=null;s=init();render();renderSc()}
+function doStep(){const [k,v]=SC[tab][2][step];step++;act(k,v);renderSc()}
+render();renderSc();
+</script></body></html>
