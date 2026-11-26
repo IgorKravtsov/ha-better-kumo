@@ -119,8 +119,9 @@ Body:
   signature, and `desktop`/`disconnected` bodies whose `seq` is not newer than the last applied one in the same
   `boot` or that come from a boot it has moved on from. Boot ids are random and a stopped relay's bodies can still
   arrive late, so on a `desktop`/`disconnected` body from an unfamiliar boot the receiver asks `GET /v1/events`
-  for the running boot: it switches to that boot (applying the newest body it held from it, or polling when it has
-  none) and drops every other boot for good.
+  for the running boot. It switches to that boot (applying the newest body it held from it, or polling when it has
+  none) and from then on drops the boot it replaced; held bodies of other boots are dropped, and a later body from
+  one of them is checked again.
 - `desktop` is sent when the snapshot changes. The relay reads the state 250 ms after an office frame, a
   (dis)connect or a registration change, and otherwise about every 1.25 s, since Daily changes such as earshot and
   the call send no office frame. Position-only changes (`x`/`y` of `self` or `people`) are not sent; any other

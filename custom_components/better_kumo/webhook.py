@@ -203,26 +203,27 @@ class WebhookReceiver:
             )
 
     async def _async_check_boot(self) -> None:
-        try:
-            current = await self.coordinator.client.boot()
-        except RelayError as err:
-            _LOGGER.debug("Could not read the relay boot id: %s", err)
-            self._held.clear()
-            return
-        self._retired_boots.update(b for b in self._held if b != current)
-        held = self._held.pop(current, None)
-        self._held.clear()
-        if current == self.boot:
-            return
-        if self.boot is not None:
-            self._retired_boots.add(self.boot)
-        self.boot = current
-        if held is None:
-            self.seq = -1
-            await self.coordinator.async_request_refresh()
-        else:
-            self.seq = held[0]
-            self._apply(held[1], held[2])
+        while self._held:
+            # Bodies held after the request went out may come from a boot newer than its reply.
+            held, self._held = self._held, {}
+            try:
+                current = await self.coordinator.client.boot()
+            except RelayError as err:
+                _LOGGER.debug("Could not read the relay boot id: %s", err)
+                continue
+            if current != self.boot:
+                if self.boot is not None:
+                    self._retired_boots.add(self.boot)
+                self.boot, self.seq = current, -1
+                if current not in held:
+                    self.entry.async_create_background_task(
+                        self.hass,
+                        self.coordinator.async_request_refresh(),
+                        "better_kumo refresh after relay restart",
+                    )
+            if (body := held.get(current)) and body[0] > self.seq:
+                self.seq = body[0]
+                self._apply(body[1], body[2])
 
     @callback
     def _apply(self, kind: str, payload: dict[str, Any]) -> None:

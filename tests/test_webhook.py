@@ -236,3 +236,28 @@ async def test_bodies_during_a_boot_check_keep_the_newest(
         await hass.async_block_till_done(wait_background_tasks=True)
     assert receiver.seq == 3
     assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
+
+
+async def test_relay_restart_during_a_boot_check(
+    hass: HomeAssistant, post, config_entry: MockConfigEntry
+) -> None:
+    receiver = config_entry.runtime_data.receiver
+    gate = asyncio.Event()
+    replies = ["b2", "b3"]
+
+    async def boot() -> str:
+        # The b2 reply is produced, then b2 stops and b3's first body arrives before HA reads it.
+        reply = replies.pop(0)
+        if reply == "b2":
+            await gate.wait()
+        return reply
+
+    with patch.object(config_entry.runtime_data.client, "boot", side_effect=boot):
+        receiver.handle_payload("b2", 1, "desktop", {"desktop": desktop_state(inCall=False)})
+        receiver.handle_payload("b3", 1, "desktop", {"desktop": desktop_state(inCall=True)})
+        gate.set()
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert (receiver.boot, receiver.seq) == ("b3", 1)
+    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
+    receiver.handle_payload("b3", 2, "desktop", {"desktop": desktop_state(inCall=False)})
+    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
