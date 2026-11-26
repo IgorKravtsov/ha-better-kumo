@@ -1,0 +1,93 @@
+blueprint:
+  name: Better Kumo – light while talking
+  description: >-
+    Changes a light's color while you are in a Kumospace call or someone is in
+    earshot, and restores the light after both have been off for a while.
+  domain: automation
+  source_url: https://github.com/IgorKravtsov/ha-better-kumo/blob/main/blueprints/automation/better_kumo/talking_light.yaml
+  input:
+    light:
+      name: Light
+      selector:
+        entity:
+          domain: light
+    color:
+      name: Color while talking
+      default: [255, 0, 0]
+      selector:
+        color_rgb:
+    off_delay:
+      name: Restore after
+      description: How long both sensors must be off before the light is restored.
+      default:
+        seconds: 30
+      selector:
+        duration:
+    in_call:
+      name: In a call sensor
+      selector:
+        entity:
+          integration: better_kumo
+          domain: binary_sensor
+    earshot:
+      name: Someone in earshot sensor
+      selector:
+        entity:
+          integration: better_kumo
+          domain: binary_sensor
+
+mode: queued
+
+variables:
+  light_entity: !input light
+  in_call_entity: !input in_call
+  earshot_entity: !input earshot
+  scene_id: "better_kumo_{{ light_entity | replace('.', '_') }}"
+  scene_entity: "scene.{{ scene_id }}"
+
+triggers:
+  - trigger: template
+    id: talking
+    value_template: >-
+      {{ is_state(in_call_entity, 'on') or is_state(earshot_entity, 'on') }}
+  - trigger: template
+    id: quiet
+    value_template: >-
+      {{ not is_state(in_call_entity, 'on') and not is_state(earshot_entity, 'on') }}
+    for: !input off_delay
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: talking
+        sequence:
+          # Snapshot only once per talk, so a later trigger never saves the talking color.
+          - if:
+              - condition: template
+                value_template: >-
+                  {{ states.scene | selectattr('entity_id', 'eq', scene_entity) | list | count == 0 }}
+            then:
+              - action: scene.create
+                data:
+                  scene_id: "{{ scene_id }}"
+                  snapshot_entities:
+                    - "{{ light_entity }}"
+          - action: light.turn_on
+            target:
+              entity_id: !input light
+            data:
+              rgb_color: !input color
+      - conditions:
+          - condition: trigger
+            id: quiet
+          - condition: template
+            value_template: >-
+              {{ states.scene | selectattr('entity_id', 'eq', scene_entity) | list | count > 0 }}
+        sequence:
+          - action: scene.turn_on
+            target:
+              entity_id: "{{ scene_entity }}"
+          - action: scene.delete
+            target:
+              entity_id: "{{ scene_entity }}"

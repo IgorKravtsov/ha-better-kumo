@@ -1,0 +1,96 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Pair with the Better Kumo relay",
+        "description": "Paste the pairing link from the relay's **Pair a phone…** page, or enter the relay URL and secret.",
+        "data": {
+          "link": "Pairing link",
+          "url": "Relay URL",
+          "secret": "Secret"
+        },
+        "data_description": {
+          "link": "kumowatch://relay?url=…&secret=…",
+          "url": "For example http://kumo-mac.local:8787. A Tailscale address keeps working when the computer is away from home."
+        }
+      }
+    },
+    "error": {
+      "missing_input": "Paste a pairing link, or enter both the relay URL and the secret.",
+      "invalid_link": "This is not a Better Kumo pairing link.",
+      "invalid_url": "Enter an http:// or https:// URL.",
+      "invalid_auth": "The relay rejected the secret.",
+      "cannot_connect": "Could not reach the relay."
+    },
+    "abort": {
+      "already_configured": "This Kumospace account is already set up; its address and secret were updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "poll_interval": "Poll interval",
+          "webhook_url": "Home Assistant URL for webhooks"
+        },
+        "data_description": {
+          "poll_interval": "How often to read the state from the relay, in seconds (1–3600). Polling runs even when webhooks work.",
+          "webhook_url": "Optional. Tried first by the relay, before the internal and external URLs of Home Assistant. For example https://ha.example.com."
+        }
+      }
+    },
+    "error": {
+      "invalid_url": "Enter an http:// or https:// URL."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "in_call": {
+        "name": "In a call"
+      },
+      "someone_in_earshot": {
+        "name": "Someone in earshot"
+      }
+    },
+    "select": {
+      "status_select": {
+        "name": "Status",
+        "state": {
+          "available": "Available",
+          "away": "Away",
+          "focusing": "Focusing"
+        }
+      }
+    },
+    "sensor": {
+      "status": {
+        "name": "Status",
+        "state": {
+          "available": "Available",
+          "away": "Away",
+          "focusing": "Focusing"
+        }
+      },
+      "room": {
+        "name": "Room"
+      },
+      "earshot_count": {
+        "name": "People in earshot",
+        "unit_of_measurement": "people",
+        "state_attributes": {
+          "names": {
+            "name": "Names"
+          }
+        }
+      }
+    },
+    "switch": {
+      "microphone": {
+        "name": "Microphone"
+      },
+      "camera": {
+        "name": "Camera"
+      }
+    }
+  }
+}

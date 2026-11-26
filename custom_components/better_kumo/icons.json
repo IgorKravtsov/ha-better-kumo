@@ -1,0 +1,20 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "in_call": { "default": "mdi:phone-off", "state": { "on": "mdi:phone-in-talk" } },
+      "someone_in_earshot": { "default": "mdi:ear-hearing-off", "state": { "on": "mdi:ear-hearing" } }
+    },
+    "select": {
+      "status_select": { "default": "mdi:account-circle" }
+    },
+    "sensor": {
+      "status": { "default": "mdi:account-circle" },
+      "room": { "default": "mdi:door" },
+      "earshot_count": { "default": "mdi:account-voice" }
+    },
+    "switch": {
+      "microphone": { "default": "mdi:microphone-off", "state": { "on": "mdi:microphone" } },
+      "camera": { "default": "mdi:video-off", "state": { "on": "mdi:video" } }
+    }
+  }
+}
