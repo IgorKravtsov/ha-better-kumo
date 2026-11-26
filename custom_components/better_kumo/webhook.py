@@ -77,7 +77,8 @@ class WebhookReceiver:
         self.coordinator = coordinator
         self.boot: str | None = None
         self._retired_boots: set[str] = set()
-        self._late_seqs: dict[str, set[int]] = {}
+        self._held: dict[str, tuple[int, str, dict[str, Any]]] = {}
+        self._boot_check: asyncio.Task[None] | None = None
         self._fired_events: deque[tuple[str, int]] = deque(maxlen=256)
         self._lock = asyncio.Lock()
         self._closed = False
@@ -181,23 +182,51 @@ class WebhookReceiver:
             return
         if kind not in ("desktop", "disconnected"):
             return
-        if boot in self._retired_boots:
-            late = self._late_seqs.setdefault(boot, set())
-            late.add(seq)
-            # A stopped relay has at most one body in flight (possibly sent to two URLs), so a
-            # second seq means this boot is live and the one that retired it was the late one.
-            if len(late) < 2:
-                _LOGGER.debug("Dropped %s body from retired boot %s/%s", kind, boot, seq)
+        if boot == self.boot:
+            if seq <= self.seq:
+                _LOGGER.debug("Dropped stale %s body %s/%s", kind, boot, seq)
                 return
-            self._retired_boots.discard(boot)
-            del self._late_seqs[boot]
-        elif boot == self.boot and seq <= self.seq:
-            _LOGGER.debug("Dropped stale %s body %s/%s", kind, boot, seq)
+            self.seq = seq
+            self._apply(kind, payload)
             return
-        if self.boot is not None and boot != self.boot:
+        if boot in self._retired_boots:
+            _LOGGER.debug("Dropped %s body from retired boot %s/%s", kind, boot, seq)
+            return
+        # Boot ids are random, so only the relay can tell whether an unfamiliar boot is the
+        # running one or the last in-flight body of a process that already stopped.
+        held = self._held.get(boot)
+        if held is None or seq > held[0]:
+            self._held[boot] = (seq, kind, payload)
+        if self._boot_check is None or self._boot_check.done():
+            self._boot_check = self.entry.async_create_background_task(
+                self.hass, self._async_check_boot(), "better_kumo boot check"
+            )
+
+    async def _async_check_boot(self) -> None:
+        try:
+            current = await self.coordinator.client.boot()
+        except RelayError as err:
+            _LOGGER.debug("Could not read the relay boot id: %s", err)
+            self._held.clear()
+            return
+        self._retired_boots.update(b for b in self._held if b != current)
+        held = self._held.pop(current, None)
+        self._held.clear()
+        if current == self.boot:
+            return
+        if self.boot is not None:
             self._retired_boots.add(self.boot)
-        self.boot, self.seq = boot, seq
+        self.boot = current
+        if held is None:
+            self.seq = -1
+            await self.coordinator.async_request_refresh()
+        else:
+            self.seq = held[0]
+            self._apply(held[1], held[2])
+
+    @callback
+    def _apply(self, kind: str, payload: dict[str, Any]) -> None:
         if kind == "desktop":
             self.coordinator.async_apply(payload["desktop"])
-        elif kind == "disconnected":
+        else:
             self.coordinator.async_mark_disconnected()

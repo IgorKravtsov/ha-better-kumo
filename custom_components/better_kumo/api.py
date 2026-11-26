@@ -103,6 +103,13 @@ class RelayClient:
         """GET /v1/desktop."""
         return await self._object("GET", "/v1/desktop")
 
+    async def boot(self) -> str:
+        """Boot id of the running relay, from GET /v1/events (returns at once without params)."""
+        boot = (await self._object("GET", "/v1/events")).get("boot")
+        if not isinstance(boot, str):
+            raise RelayError("unexpected reply from the relay: no boot id")
+        return boot
+
     async def set_availability(self, availability: str) -> dict[str, Any]:
         """POST /v1/desktop/status."""
         return await self._object("POST", "/v1/desktop/status", {"availability": availability})

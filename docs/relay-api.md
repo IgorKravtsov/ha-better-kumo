@@ -47,10 +47,12 @@ The integration treats any error (and an unreachable relay) the same way: every 
 | `inCall` | `bool` | I am in an audio/video conversation (the same signal as `inCall` in the Meetings page tick). |
 | `call` | `{ "roomName": string, "peers": string[] } \| null` | the current Daily call; non-null while the desktop is in the call and while the call is handed off to a phone. It never contains the call's `url` or `token`. |
 
-### `GET /v1/events` (existing, not used)
+### `GET /v1/events` (existing, used only for the boot id)
 
-The integration does not read the office event log. `better_kumo_event` is fired only from `event` webhook
-deliveries, so it needs working webhooks; polling recovers desktop state only.
+Without parameters it answers at once with `EventsPage { boot, latest, events: [], desktopConnected }`. The
+integration calls it only to learn the running relay's `boot` (see Delivery). It does not read the office event
+log: `better_kumo_event` is fired only from `event` webhook deliveries, so it needs working webhooks; polling
+recovers desktop state only.
 
 ## Commands (existing)
 
@@ -115,8 +117,10 @@ Body:
   `seq`, so a gap means bodies this receiver did not get (dropped from a full queue or refused by every URL), and a
   webhook registered later starts above 1. The receiver only needs `seq` to grow: it drops bodies with a bad
   signature, and `desktop`/`disconnected` bodies whose `seq` is not newer than the last applied one in the same
-  `boot` or that come from a boot it has moved on from. Boot ids are random, so the receiver goes back to a boot it
-  moved away from once that boot sends two different `seq`s: a stopped relay has at most one body in flight.
+  `boot` or that come from a boot it has moved on from. Boot ids are random and a stopped relay's bodies can still
+  arrive late, so on a `desktop`/`disconnected` body from an unfamiliar boot the receiver asks `GET /v1/events`
+  for the running boot: it switches to that boot (applying the newest body it held from it, or polling when it has
+  none) and drops every other boot for good.
 - `desktop` is sent when the snapshot changes. The relay reads the state 250 ms after an office frame, a
   (dis)connect or a registration change, and otherwise about every 1.25 s, since Daily changes such as earshot and
   the call send no office frame. Position-only changes (`x`/`y` of `self` or `people`) are not sent; any other
