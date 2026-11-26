@@ -95,7 +95,7 @@ def relay(
     aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
     aioclient_mock.get(f"{RELAY}/v1/events", side_effect=events)
     hook = f"{RELAY}/v1/webhooks/{config_entry.entry_id}"
-    aioclient_mock.put(hook, status=204)
+    aioclient_mock.put(hook, json={"id": config_entry.entry_id, "urls": []})
     aioclient_mock.delete(hook, status=204)
     return aioclient_mock
 

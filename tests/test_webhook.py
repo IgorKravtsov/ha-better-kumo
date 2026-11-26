@@ -153,6 +153,9 @@ async def test_duplicate_event_fires_once(hass: HomeAssistant, post) -> None:
         {"boot": "b1", "seq": 1.5, "kind": "disconnected"},
         {"boot": "b1", "seq": 1e400, "kind": "disconnected"},
         {"boot": "b1", "seq": 1, "kind": ["desktop"]},
+        {"boot": "b1", "seq": -1, "kind": "disconnected"},
+        {"boot": "b1", "seq": 1, "kind": "desktop", "desktop": desktop_state(people=[None])},
+        {"boot": "b1", "seq": 1, "kind": "desktop", "desktop": desktop_state(earshot="p2")},
     ],
 )
 async def test_malformed_body(hass: HomeAssistant, post, payload: dict) -> None:
@@ -314,3 +317,11 @@ async def test_held_body_newer_than_a_slow_poll_is_applied(
         await hass.async_block_till_done(wait_background_tasks=True)
     expected = "on" if kind == "desktop" else STATE_UNAVAILABLE
     assert hass.states.get("binary_sensor.kumospace_in_a_call").state == expected
+
+
+async def test_unloading_receiver_rejects_bodies(
+    hass: HomeAssistant, post, config_entry: MockConfigEntry
+) -> None:
+    config_entry.runtime_data.receiver._closed = True
+    assert await post({"boot": "b1", "seq": 1, "kind": "disconnected"}) == 410
+    assert hass.states.get("sensor.kumospace_status").state == "available"

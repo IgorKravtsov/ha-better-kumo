@@ -58,6 +58,23 @@ def normalize_url(url: str) -> str:
     return url
 
 
+def is_desktop_state(state: Any) -> bool:
+    """Check the shape of the DesktopState fields the entities read."""
+
+    def list_of(value: Any, kind: type) -> bool:
+        return value is None or (
+            isinstance(value, list) and all(isinstance(v, kind) for v in value)
+        )
+
+    return (
+        isinstance(state, dict)
+        and isinstance(state.get("self") or {}, dict)
+        and list_of(state.get("zones"), dict)
+        and list_of(state.get("people"), dict)
+        and list_of(state.get("earshot"), str)
+    )
+
+
 class RelayClient:
     """Thin async wrapper over the relay's /v1 endpoints."""
 
@@ -86,7 +103,7 @@ class RelayClient:
             raise RelayError(f"relay not reachable: {err}") from err
         try:
             return json.loads(text) if text.strip() else None
-        except ValueError as err:
+        except (ValueError, RecursionError) as err:
             raise RelayError(f"unexpected reply from the relay: {err}") from err
 
     async def _object(self, method: str, path: str, body: Any = None) -> dict[str, Any]:
@@ -99,9 +116,15 @@ class RelayClient:
         """GET /v1/status."""
         return await self._object("GET", "/v1/status")
 
+    async def _desktop(self, method: str, path: str, body: Any = None) -> dict[str, Any]:
+        state = await self._object(method, path, body)
+        if not is_desktop_state(state):
+            raise RelayError("unexpected reply from the relay: malformed desktop state")
+        return state
+
     async def desktop(self) -> dict[str, Any]:
         """GET /v1/desktop."""
-        return await self._object("GET", "/v1/desktop")
+        return await self._desktop("GET", "/v1/desktop")
 
     async def boot(self) -> str:
         """Boot id of the running relay, from GET /v1/events (returns at once without params)."""
@@ -112,11 +135,11 @@ class RelayClient:
 
     async def set_availability(self, availability: str) -> dict[str, Any]:
         """POST /v1/desktop/status."""
-        return await self._object("POST", "/v1/desktop/status", {"availability": availability})
+        return await self._desktop("POST", "/v1/desktop/status", {"availability": availability})
 
     async def set_media(self, **media: bool) -> dict[str, Any]:
         """POST /v1/desktop/media with audio= and/or video=."""
-        return await self._object("POST", "/v1/desktop/media", media)
+        return await self._desktop("POST", "/v1/desktop/media", media)
 
     async def put_webhook(self, hook_id: str, urls: list[str], secret: str) -> None:
         """PUT /v1/webhooks/{id}."""

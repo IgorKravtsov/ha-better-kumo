@@ -20,7 +20,7 @@ from custom_components.better_kumo.const import (
     DOMAIN,
 )
 
-from .conftest import RELAY, SECRET, setup_entry
+from .conftest import RELAY, SECRET, WEBHOOK_SECRET, setup_entry
 
 LINK = "kumowatch://relay?url=http%3A%2F%2Fkumo-mac.local%3A8787%2F&secret=s%2Bc%26r%3Dt"
 
@@ -136,6 +136,8 @@ async def test_repairing_updates_the_entry(
     assert result["reason"] == "already_configured"
     assert config_entry.data[CONF_URL] == "http://100.64.0.1:8787"
     assert config_entry.data[CONF_SECRET] == "new"
+    # A new relay address gets a new signing secret: the old relay may keep its registration.
+    assert config_entry.data[CONF_WEBHOOK_SECRET] != WEBHOOK_SECRET
 
 
 async def test_options(
@@ -155,6 +157,10 @@ async def test_options(
     assert result["errors"] == {CONF_WEBHOOK_URL: "invalid_url"}
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {CONF_POLL_INTERVAL: 1.9}
+    )
+    assert result["errors"] == {CONF_POLL_INTERVAL: "invalid_interval"}
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_POLL_INTERVAL: "NaN"}
     )
     assert result["errors"] == {CONF_POLL_INTERVAL: "invalid_interval"}
     result = await hass.config_entries.options.async_configure(

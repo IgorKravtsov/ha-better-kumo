@@ -19,7 +19,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 
-from .api import RelayError
+from .api import RelayError, is_desktop_state
 from .const import (
     CONF_WEBHOOK_SECRET,
     CONF_WEBHOOK_URL,
@@ -82,6 +82,8 @@ class WebhookReceiver:
         self._fired_events: deque[tuple[str, int]] = deque(maxlen=256)
         self._lock = asyncio.Lock()
         self._closed = False
+        # Re-pairing rotates the secret; this receiver must never register the new one.
+        self._secret: str = entry.data[CONF_WEBHOOK_SECRET]
         self.seq = -1
         self.registered_urls: list[str] = []
         self.last_error: str | None = None
@@ -116,9 +118,7 @@ class WebhookReceiver:
             async with self._lock:
                 if self._closed:
                     return
-                await self.coordinator.client.put_webhook(
-                    self.entry.entry_id, urls, self.entry.data[CONF_WEBHOOK_SECRET]
-                )
+                await self.coordinator.client.put_webhook(self.entry.entry_id, urls, self._secret)
         except RelayError as err:
             if self.last_error is None:
                 _LOGGER.warning(
@@ -147,7 +147,7 @@ class WebhookReceiver:
     ) -> web.Response:
         body = await request.read()
         if not valid_signature(
-            self.entry.data[CONF_WEBHOOK_SECRET],
+            self._secret,
             body,
             request.headers.get("X-Kumo-Signature"),
         ):
@@ -160,11 +160,16 @@ class WebhookReceiver:
                 not isinstance(boot, str)
                 or not isinstance(kind, str)
                 or type(seq) is not int
-                or (kind in ("desktop", "event") and not isinstance(payload[kind], dict))
+                or seq < 0
+                or (kind == "event" and not isinstance(payload[kind], dict))
+                or (kind == "desktop" and not is_desktop_state(payload[kind]))
             ):
                 raise TypeError
         except (ValueError, KeyError, TypeError):
             return web.Response(status=HTTPStatus.BAD_REQUEST)
+        # The endpoint stays registered until unload returns, and a request may already be in.
+        if self._closed:
+            return web.Response(status=HTTPStatus.GONE)
         self.handle_payload(boot, seq, kind, payload)
         return web.Response(status=HTTPStatus.OK)
 

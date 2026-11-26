@@ -46,10 +46,14 @@ class BetterKumoEntity(CoordinatorEntity[BetterKumoCoordinator]):
         return self.state_data.get("self") or {}
 
     async def _command(self, request: Awaitable[dict[str, Any]]) -> None:
-        generation = self.coordinator.generation
+        coordinator = self.coordinator
+        generation, polls = coordinator.generation, coordinator.polls_started
         try:
             state = await request
         except RelayError as err:
             raise HomeAssistantError(f"Better Kumo relay: {err}") from err
-        if isinstance(state, dict) and generation == self.coordinator.generation:
-            self.coordinator.async_apply(state)
+        if generation == coordinator.generation and coordinator.applied_poll <= polls:
+            coordinator.async_apply(state)
+        else:
+            # Something newer landed meanwhile, but it may predate this command's effect.
+            await coordinator.async_request_refresh()

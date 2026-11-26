@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import secrets
 from typing import Any
 
@@ -101,9 +102,14 @@ class BetterKumoConfigFlow(ConfigFlow, domain=DOMAIN):
                     # The relay serves exactly one Kumospace account; its uid is
                     # stable across relay address changes (LAN vs Tailscale).
                     await self.async_set_unique_id(str(status.get("uid") or url))
-                    self._abort_if_unique_id_configured(
-                        updates={CONF_URL: url, CONF_SECRET: secret}
+                    updates = {CONF_URL: url, CONF_SECRET: secret}
+                    existing = self.hass.config_entries.async_entry_for_domain_unique_id(
+                        DOMAIN, self.unique_id
                     )
+                    # The old relay may be offline for the DELETE and keep the registration.
+                    if existing and existing.data[CONF_URL] != url:
+                        updates[CONF_WEBHOOK_SECRET] = secrets.token_hex(32)
+                    self._abort_if_unique_id_configured(updates=updates)
                     return self.async_create_entry(
                         title="Kumospace",
                         data={
@@ -136,10 +142,12 @@ class BetterKumoOptionsFlow(OptionsFlowWithReload):
         errors: dict[str, str] = {}
         if user_input is not None:
             interval = user_input[CONF_POLL_INTERVAL]
-            # The selector's step=1 is only a UI hint; the API accepts 1.9.
-            if interval != int(interval):
+            options: dict[str, Any] = {}
+            # The selector's step=1 is only a UI hint; the API accepts 1.9 and "NaN".
+            if math.isfinite(interval) and interval == int(interval):
+                options[CONF_POLL_INTERVAL] = int(interval)
+            else:
                 errors[CONF_POLL_INTERVAL] = "invalid_interval"
-            options = {CONF_POLL_INTERVAL: int(interval)}
             if override := user_input.get(CONF_WEBHOOK_URL, "").strip():
                 try:
                     options[CONF_WEBHOOK_URL] = normalize_url(override)

@@ -61,7 +61,13 @@ async def test_relay_without_new_fields(
 
 
 @pytest.mark.parametrize(
-    "mock", [{"status": 503, "text": "desktop not connected"}, {"exc": TimeoutError()}]
+    "mock",
+    [
+        {"status": 503, "text": "desktop not connected"},
+        {"status": 404, "text": "desktop bridge is disabled"},
+        {"exc": TimeoutError()},
+        {"json": desktop_state(people=[None])},
+    ],
 )
 async def test_unavailable_then_recovers(
     hass: HomeAssistant,
@@ -270,8 +276,8 @@ async def test_unload_waits_for_inflight_registration(
     assert order == ["put", "delete"]
 
 
-@pytest.mark.parametrize("newer", ["disconnected", "desktop"])
-async def test_command_response_older_than_push_is_ignored(
+@pytest.mark.parametrize("newer", ["disconnected", "desktop", "failed poll"])
+async def test_command_response_older_than_push_or_poll_is_ignored(
     hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry, newer: str
 ) -> None:
     await setup_entry(hass, config_entry)
@@ -282,7 +288,15 @@ async def test_command_response_older_than_push_is_ignored(
         await gate.wait()
         return desktop_state(audio=False)
 
-    with patch.object(coordinator.client, "set_media", side_effect=slow_media):
+    async def desktop():
+        if newer == "desktop":
+            return desktop_state(audio=True, inCall=True)
+        raise RelayError("relay returned 503: not connected")
+
+    with (
+        patch.object(coordinator.client, "set_media", side_effect=slow_media),
+        patch.object(coordinator.client, "desktop", side_effect=desktop),
+    ):
         task = hass.async_create_task(
             hass.services.async_call(
                 "switch", "turn_off", {"entity_id": "switch.kumospace_microphone"}, blocking=True
@@ -291,9 +305,12 @@ async def test_command_response_older_than_push_is_ignored(
         await asyncio.sleep(0)
         if newer == "disconnected":
             coordinator.async_mark_disconnected()
-        else:
+        elif newer == "desktop":
             coordinator.async_apply(desktop_state(audio=True, inCall=True))
+        else:
+            await coordinator.async_refresh()
         gate.set()
         await task
+        await hass.async_block_till_done()
     mic = hass.states.get("switch.kumospace_microphone").state
-    assert mic == (STATE_UNAVAILABLE if newer == "disconnected" else "on")
+    assert mic == ("on" if newer == "desktop" else STATE_UNAVAILABLE)

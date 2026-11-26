@@ -30,10 +30,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: BetterKumoConfigEntry) -
     await coordinator.async_refresh()
     entry.runtime_data = coordinator
 
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Last, so a failed setup cannot leave a registration the relay keeps on disk.
     coordinator.receiver = WebhookReceiver(hass, entry, coordinator)
     await coordinator.receiver.async_setup()
-
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
