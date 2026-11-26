@@ -128,7 +128,8 @@ Body:
   change is.
 - `disconnected` is sent when the state can no longer be read after a `desktop` was sent: Kumospace desktop went
   away, or runs but is not in a space (the same cases where `GET /v1/desktop` answers 503). The integration marks
-  entities unavailable until the next `desktop` body or good poll.
+  entities unavailable and polls at once, since a late `disconnected` can follow a poll that already saw the
+  reconnect.
 - At relay start and after a new or changed registration, the relay sends the current `desktop` or
   `disconnected` on its next read, to every registered webhook.
 - `event` is sent for every entry the relay's event log records.

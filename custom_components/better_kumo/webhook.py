@@ -238,3 +238,9 @@ class WebhookReceiver:
             self.coordinator.async_apply(payload["desktop"])
         else:
             self.coordinator.async_mark_disconnected()
+            # A late `disconnected` can follow a poll that already saw the reconnect.
+            self.entry.async_create_background_task(
+                self.hass,
+                self.coordinator.async_request_refresh(),
+                "better_kumo refresh after disconnect",
+            )

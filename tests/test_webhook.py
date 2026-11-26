@@ -15,12 +15,19 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_capture_events
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
+from custom_components.better_kumo.api import RelayError
 from custom_components.better_kumo.const import CONF_WEBHOOK_URL, EVENT_BETTER_KUMO
 from custom_components.better_kumo.webhook import valid_signature
 
 from .conftest import RELAY, WEBHOOK_SECRET, desktop_state, setup_entry
 
 PATH = "/api/webhook/hook-1"
+
+
+def desktop_down(config_entry: MockConfigEntry):
+    return patch.object(
+        config_entry.runtime_data.client, "desktop", side_effect=RelayError("relay returned 503")
+    )
 
 
 def sign(body: bytes, secret: str = WEBHOOK_SECRET) -> str:
@@ -82,7 +89,7 @@ async def test_stale_seq_is_dropped(hass: HomeAssistant, post, relay_boot: list[
 
 
 async def test_late_bodies_from_a_stopped_boot_are_dropped(
-    hass: HomeAssistant, post, relay_boot: list[str]
+    hass: HomeAssistant, post, relay_boot: list[str], config_entry: MockConfigEntry
 ) -> None:
     relay_boot[0] = "b2"
     await post({"boot": "b2", "seq": 1, "kind": "desktop", "desktop": desktop_state(inCall=True)})
@@ -92,7 +99,8 @@ async def test_late_bodies_from_a_stopped_boot_are_dropped(
             {"boot": "b1", "seq": seq, "kind": "desktop", "desktop": desktop_state(inCall=False)}
         )
         assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
-    await post({"boot": "b2", "seq": 2, "kind": "disconnected"})
+    with desktop_down(config_entry):
+        await post({"boot": "b2", "seq": 2, "kind": "disconnected"})
     assert hass.states.get("binary_sensor.kumospace_in_a_call").state == STATE_UNAVAILABLE
 
 
@@ -116,10 +124,17 @@ async def test_failed_boot_check_drops_the_body(
     assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
 
 
-async def test_disconnected(hass: HomeAssistant, post) -> None:
-    await post({"boot": "b1", "seq": 1, "kind": "disconnected"})
+async def test_disconnected(hass: HomeAssistant, post, config_entry: MockConfigEntry) -> None:
+    with desktop_down(config_entry):
+        await post({"boot": "b1", "seq": 1, "kind": "disconnected"})
     assert hass.states.get("sensor.kumospace_status").state == STATE_UNAVAILABLE
     await post({"boot": "b1", "seq": 2, "kind": "desktop", "desktop": desktop_state()})
+    assert hass.states.get("sensor.kumospace_status").state == "available"
+
+
+async def test_late_disconnected_is_checked_by_a_poll(hass: HomeAssistant, post) -> None:
+    # The relay mock is healthy: this `disconnected` was sent before a reconnect.
+    await post({"boot": "b1", "seq": 1, "kind": "disconnected"})
     assert hass.states.get("sensor.kumospace_status").state == "available"
 
 
@@ -296,6 +311,8 @@ async def test_held_body_newer_than_a_slow_poll_is_applied(
     poll_read, poll_gate, boot_gate = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
     async def slow_desktop() -> dict[str, Any]:
+        if poll_read.is_set() and kind == "disconnected":
+            raise RelayError("relay returned 503")
         poll_read.set()
         await poll_gate.wait()
         return desktop_state(inCall=False)
