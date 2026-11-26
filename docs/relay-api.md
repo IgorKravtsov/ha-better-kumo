@@ -83,7 +83,7 @@ Answers `{"id": "…", "urls": […]}`. Limits (400 otherwise):
 
 - `id`: 1–64 characters, `[A-Za-z0-9_-]`.
 - `urls`: 1–8 `http://` or `https://` URLs with a host.
-- `secret`: 16–256 characters. The HMAC key is the secret's UTF-8 bytes, not the hex-decoded value.
+- `secret`: 16–256 bytes of UTF-8. The HMAC key is those bytes, not the hex-decoded value.
 
 Behaviour:
 
@@ -111,18 +111,21 @@ Body:
 { "boot": "<relay boot id>", "seq": 44, "kind": "disconnected" }
 ```
 
-- `seq` is one counter per relay boot, shared by all webhooks, and a new `boot` restarts it. A gap may mean a
-  delivery to another webhook as well as a dropped one. The receiver only needs `seq` to grow: it drops bodies with
-  a bad signature, and `desktop`/`disconnected` bodies whose `seq` is not newer than the last applied one in the same
-  `boot` (or that come from an older `boot`).
-- `desktop` is sent when the snapshot changes, debounced 250 ms. The relay also re-reads the state every second,
-  since Daily changes such as earshot and the call send no office frame. Position-only changes (`x`/`y` of `self`
-  or `people`) are not sent; any other change is.
+- `seq` is one counter per relay boot, and a new `boot` restarts it. Every body goes to every webhook with the same
+  `seq`, so a gap means bodies this receiver did not get (dropped from a full queue or refused by every URL), and a
+  webhook registered later starts above 1. The receiver only needs `seq` to grow: it drops bodies with a bad
+  signature, and `desktop`/`disconnected` bodies whose `seq` is not newer than the last applied one in the same
+  `boot` or that come from a boot it has moved on from. Boot ids are random, so the receiver goes back to a boot it
+  moved away from once that boot sends two different `seq`s: a stopped relay has at most one body in flight.
+- `desktop` is sent when the snapshot changes. The relay reads the state 250 ms after an office frame, a
+  (dis)connect or a registration change, and otherwise about every 1.25 s, since Daily changes such as earshot and
+  the call send no office frame. Position-only changes (`x`/`y` of `self` or `people`) are not sent; any other
+  change is.
 - `disconnected` is sent when the state can no longer be read after a `desktop` was sent: Kumospace desktop went
   away, or runs but is not in a space (the same cases where `GET /v1/desktop` answers 503). The integration marks
   entities unavailable until the next `desktop` body or good poll.
-- A new or changed registration, and every registration at relay start, immediately gets the current `desktop`
-  or `disconnected`.
+- At relay start and after a new or changed registration, the relay sends the current `desktop` or
+  `disconnected` on its next read, to every registered webhook.
 - `event` is sent for every entry the relay's event log records.
 - Delivery is fire-and-forget: 3 s timeout per URL attempt, redirects are not followed (the webhook URL must be the
   final address), and each webhook has a queue of 64 bodies; when it is full, new bodies are dropped. Missed

@@ -77,6 +77,7 @@ class WebhookReceiver:
         self.coordinator = coordinator
         self.boot: str | None = None
         self._retired_boots: set[str] = set()
+        self._late_seqs: dict[str, set[int]] = {}
         self._fired_events: deque[tuple[str, int]] = deque(maxlen=256)
         self._lock = asyncio.Lock()
         self._closed = False
@@ -153,10 +154,13 @@ class WebhookReceiver:
             return web.Response(status=HTTPStatus.UNAUTHORIZED)
         try:
             payload = json.loads(body)
-            boot = str(payload["boot"])
-            seq = int(payload["seq"])
-            kind = payload["kind"]
-            if kind in ("desktop", "event") and not isinstance(payload[kind], dict):
+            boot, seq, kind = payload["boot"], payload["seq"], payload["kind"]
+            if (
+                not isinstance(boot, str)
+                or not isinstance(kind, str)
+                or type(seq) is not int
+                or (kind in ("desktop", "event") and not isinstance(payload[kind], dict))
+            ):
                 raise TypeError
         except (ValueError, KeyError, TypeError):
             return web.Response(status=HTTPStatus.BAD_REQUEST)
@@ -177,7 +181,17 @@ class WebhookReceiver:
             return
         if kind not in ("desktop", "disconnected"):
             return
-        if boot in self._retired_boots or (boot == self.boot and seq <= self.seq):
+        if boot in self._retired_boots:
+            late = self._late_seqs.setdefault(boot, set())
+            late.add(seq)
+            # A stopped relay has at most one body in flight (possibly sent to two URLs), so a
+            # second seq means this boot is live and the one that retired it was the late one.
+            if len(late) < 2:
+                _LOGGER.debug("Dropped %s body from retired boot %s/%s", kind, boot, seq)
+                return
+            self._retired_boots.discard(boot)
+            del self._late_seqs[boot]
+        elif boot == self.boot and seq <= self.seq:
             _LOGGER.debug("Dropped stale %s body %s/%s", kind, boot, seq)
             return
         if self.boot is not None and boot != self.boot:

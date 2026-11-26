@@ -78,6 +78,20 @@ async def test_stale_seq_is_dropped(hass: HomeAssistant, post) -> None:
     assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
 
 
+async def test_late_body_from_an_unseen_boot_does_not_block_the_live_one(
+    hass: HomeAssistant, post
+) -> None:
+    await post({"boot": "b2", "seq": 1, "kind": "desktop", "desktop": desktop_state(inCall=True)})
+    # The last body of a relay process that stopped before b2 started arrives late.
+    await post({"boot": "b1", "seq": 7, "kind": "desktop", "desktop": desktop_state(inCall=False)})
+    await post({"boot": "b2", "seq": 2, "kind": "desktop", "desktop": desktop_state(inCall=True)})
+    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
+    await post({"boot": "b2", "seq": 3, "kind": "desktop", "desktop": desktop_state(inCall=True)})
+    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
+    await post({"boot": "b1", "seq": 8, "kind": "desktop", "desktop": desktop_state(inCall=False)})
+    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
+
+
 async def test_disconnected(hass: HomeAssistant, post) -> None:
     await post({"boot": "b1", "seq": 1, "kind": "disconnected"})
     assert hass.states.get("sensor.kumospace_status").state == STATE_UNAVAILABLE
@@ -110,6 +124,11 @@ async def test_duplicate_event_fires_once(hass: HomeAssistant, post) -> None:
         {"boot": "b1", "seq": 1, "kind": "desktop"},
         {"boot": "b1", "seq": 1, "kind": "desktop", "desktop": []},
         {"boot": "b1", "seq": 1, "kind": "event", "event": "x"},
+        {"boot": 1, "seq": 1, "kind": "disconnected"},
+        {"boot": "b1", "seq": True, "kind": "disconnected"},
+        {"boot": "b1", "seq": 1.5, "kind": "disconnected"},
+        {"boot": "b1", "seq": 1e400, "kind": "disconnected"},
+        {"boot": "b1", "seq": 1, "kind": ["desktop"]},
     ],
 )
 async def test_malformed_body(hass: HomeAssistant, post, payload: dict) -> None:

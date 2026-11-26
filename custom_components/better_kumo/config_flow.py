@@ -135,7 +135,11 @@ class BetterKumoOptionsFlow(OptionsFlowWithReload):
         """Handle options."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            options = {CONF_POLL_INTERVAL: int(user_input[CONF_POLL_INTERVAL])}
+            interval = user_input[CONF_POLL_INTERVAL]
+            # The selector's step=1 is only a UI hint; the API accepts 1.9.
+            if interval != int(interval):
+                errors[CONF_POLL_INTERVAL] = "invalid_interval"
+            options = {CONF_POLL_INTERVAL: int(interval)}
             if override := user_input.get(CONF_WEBHOOK_URL, "").strip():
                 try:
                     options[CONF_WEBHOOK_URL] = normalize_url(override)

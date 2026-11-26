@@ -45,12 +45,14 @@ def normalize_url(url: str) -> str:
     url = url.strip().rstrip("/")
     parts = urlsplit(url)
     # Endpoint paths are appended to this string, so a query or fragment would swallow them.
+    # Reading .port raises ValueError for a non-numeric or out-of-range port.
     if (
         parts.scheme not in ("http", "https")
         or not parts.hostname
         or parts.username is not None
-        or parts.query
-        or parts.fragment
+        or "?" in url
+        or "#" in url
+        or parts.port == 0
     ):
         raise ValueError("relay URL must be http(s)://host:port")
     return url

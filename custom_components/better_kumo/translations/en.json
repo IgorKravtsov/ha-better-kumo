@@ -41,7 +41,8 @@
       }
     },
     "error": {
-      "invalid_url": "Enter a full URL that starts with http or https."
+      "invalid_url": "Enter a full URL that starts with http or https.",
+      "invalid_interval": "Enter a whole number of seconds from 1 to 3600."
     }
   },
   "entity": {

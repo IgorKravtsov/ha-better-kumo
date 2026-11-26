@@ -89,6 +89,10 @@ async def test_pair_with_url_and_secret(
         ({"link": "https://example.com"}, "invalid_link"),
         ({CONF_URL: "kumo-mac.local:8787", CONF_SECRET: SECRET}, "invalid_url"),
         ({CONF_URL: RELAY + "/#x", CONF_SECRET: SECRET}, "invalid_url"),
+        ({CONF_URL: RELAY + "?", CONF_SECRET: SECRET}, "invalid_url"),
+        ({CONF_URL: RELAY + "/#", CONF_SECRET: SECRET}, "invalid_url"),
+        ({CONF_URL: "http://kumo-mac.local:99999", CONF_SECRET: SECRET}, "invalid_url"),
+        ({CONF_URL: "http://kumo-mac.local:port", CONF_SECRET: SECRET}, "invalid_url"),
         ({CONF_URL: RELAY, CONF_SECRET: "   "}, "missing_input"),
         ({"link": "   ", CONF_URL: "nope", CONF_SECRET: SECRET}, "invalid_url"),
         ({CONF_URL: RELAY, CONF_SECRET: "a\x01b"}, "invalid_secret"),
@@ -149,6 +153,10 @@ async def test_options(
         result["flow_id"], {CONF_POLL_INTERVAL: 5, CONF_WEBHOOK_URL: "ha.example.com"}
     )
     assert result["errors"] == {CONF_WEBHOOK_URL: "invalid_url"}
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_POLL_INTERVAL: 1.9}
+    )
+    assert result["errors"] == {CONF_POLL_INTERVAL: "invalid_interval"}
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {CONF_POLL_INTERVAL: 5, CONF_WEBHOOK_URL: "https://ha.example.com/"}
     )
