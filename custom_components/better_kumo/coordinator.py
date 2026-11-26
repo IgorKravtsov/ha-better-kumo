@@ -40,6 +40,8 @@ class BetterKumoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.client = client
         self.generation = 0
+        # Counts polls that were applied (success or failure); pushes and commands bump generation.
+        self.polls = 0
         self.receiver: WebhookReceiver | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -49,12 +51,14 @@ class BetterKumoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except RelayError as err:
             if generation != self.generation and self.last_update_success:
                 return self.data
+            self.polls += 1
             raise UpdateFailed(str(err)) from err
         # A push or command landed while this poll was in flight; it is newer.
         if generation != self.generation:
             if not self.last_update_success:
                 raise UpdateFailed(str(self.last_exception))
             return self.data
+        self.polls += 1
         return data
 
     @callback

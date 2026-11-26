@@ -261,3 +261,24 @@ async def test_relay_restart_during_a_boot_check(
     assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
     receiver.handle_payload("b3", 2, "desktop", {"desktop": desktop_state(inCall=False)})
     assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
+
+
+@pytest.mark.parametrize("kind", ["desktop", "disconnected"])
+async def test_held_body_older_than_a_poll_is_not_applied(
+    hass: HomeAssistant, post, config_entry: MockConfigEntry, kind: str
+) -> None:
+    receiver = config_entry.runtime_data.receiver
+    coordinator = config_entry.runtime_data
+    gate = asyncio.Event()
+
+    async def slow_boot() -> str:
+        await gate.wait()
+        return "b1"
+
+    with patch.object(coordinator.client, "boot", side_effect=slow_boot):
+        receiver.handle_payload("b1", 1, kind, {"desktop": desktop_state(inCall=True)})
+        await coordinator.async_refresh()
+        gate.set()
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert receiver.seq == 1
+    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"

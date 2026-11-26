@@ -77,7 +77,7 @@ class WebhookReceiver:
         self.coordinator = coordinator
         self.boot: str | None = None
         self._retired_boots: set[str] = set()
-        self._held: dict[str, tuple[int, str, dict[str, Any]]] = {}
+        self._held: dict[str, tuple[int, str, dict[str, Any], int]] = {}
         self._boot_check: asyncio.Task[None] | None = None
         self._fired_events: deque[tuple[str, int]] = deque(maxlen=256)
         self._lock = asyncio.Lock()
@@ -196,7 +196,7 @@ class WebhookReceiver:
         # running one or the last in-flight body of a process that already stopped.
         held = self._held.get(boot)
         if held is None or seq > held[0]:
-            self._held[boot] = (seq, kind, payload)
+            self._held[boot] = (seq, kind, payload, self.coordinator.polls)
         if self._boot_check is None or self._boot_check.done():
             self._boot_check = self.entry.async_create_background_task(
                 self.hass, self._async_check_boot(), "better_kumo boot check"
@@ -223,7 +223,9 @@ class WebhookReceiver:
                     )
             if (body := held.get(current)) and body[0] > self.seq:
                 self.seq = body[0]
-                self._apply(body[1], body[2])
+                # A poll that finished while the boot was checked read a newer state than this body.
+                if body[3] == self.coordinator.polls:
+                    self._apply(body[1], body[2])
 
     @callback
     def _apply(self, kind: str, payload: dict[str, Any]) -> None:
