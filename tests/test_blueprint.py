@@ -83,7 +83,6 @@ async def test_talk_colors_then_restores(hass: HomeAssistant, calls: list[Servic
     assert calls[0].data["snapshot_entities"] == ["light.desk"]
     assert calls[1].data["rgb_color"] == [0, 0, 255]
 
-    # Earshot joining mid-call must not take a second snapshot.
     hass.states.async_set(EARSHOT, "on")
     hass.states.async_set(IN_CALL, "off")
     await hass.async_block_till_done()

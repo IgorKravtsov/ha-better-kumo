@@ -266,3 +266,32 @@ async def test_unload_waits_for_inflight_registration(
         assert await unload
         await receiver.async_register()
     assert order == ["put", "delete"]
+
+
+@pytest.mark.parametrize("newer", ["disconnected", "desktop"])
+async def test_command_response_older_than_push_is_ignored(
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry, newer: str
+) -> None:
+    await setup_entry(hass, config_entry)
+    coordinator = config_entry.runtime_data
+    gate = asyncio.Event()
+
+    async def slow_media(**media):
+        await gate.wait()
+        return desktop_state(audio=False)
+
+    with patch.object(coordinator.client, "set_media", side_effect=slow_media):
+        task = hass.async_create_task(
+            hass.services.async_call(
+                "switch", "turn_off", {"entity_id": "switch.kumospace_microphone"}, blocking=True
+            )
+        )
+        await asyncio.sleep(0)
+        if newer == "disconnected":
+            coordinator.async_mark_disconnected()
+        else:
+            coordinator.async_apply(desktop_state(audio=True, inCall=True))
+        gate.set()
+        await task
+    mic = hass.states.get("switch.kumospace_microphone").state
+    assert mic == (STATE_UNAVAILABLE if newer == "disconnected" else "on")
