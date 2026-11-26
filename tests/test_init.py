@@ -104,7 +104,7 @@ async def test_poll_interval_option(
     assert sum(1 for c in relay.mock_calls if str(c[1]).endswith("/v1/desktop")) == polls + 1
 
 
-async def test_select_status_keeps_message(
+async def test_select_status_sends_only_availability(
     hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
 ) -> None:
     await setup_entry(hass, config_entry)
@@ -118,7 +118,7 @@ async def test_select_status_keeps_message(
         blocking=True,
     )
     call = next(c for c in relay.mock_calls if str(c[1]).endswith("/v1/desktop/status"))
-    assert call[2] == {"availability": "away", "message": "hi"}
+    assert call[2] == {"availability": "away"}
     assert call[3]["Authorization"] == f"Bearer {SECRET}"
     assert hass.states.get("sensor.kumospace_status").state == "away"
 

@@ -32,7 +32,5 @@ class StatusSelect(BetterKumoEntity, SelectEntity):
         return value if value in AVAILABILITIES else None
 
     async def async_select_option(self, option: str) -> None:
-        """Change status, keeping the status message (the relay clears an omitted one)."""
-        await self._command(
-            self.coordinator.client.set_availability(option, self.me.get("message") or "")
-        )
+        """Change status; the relay keeps the current status message."""
+        await self._command(self.coordinator.client.set_availability(option))

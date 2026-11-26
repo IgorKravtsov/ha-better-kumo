@@ -11,18 +11,21 @@ One device, **Kumospace**, per relay:
 | Entity | What it does |
 |---|---|
 | `sensor` Status | `available`, `away` or `focusing` |
-| `select` Status | changes your status (keeps your status message) |
+| `select` Status | changes your status (keeps your status message; an older relay clears it) |
 | `sensor` Room | name of the room you are in, empty outside rooms |
-| `switch` Microphone, Camera | turn your mic and camera on or off |
+| `switch` Microphone, Camera | turn your mic and camera on or off, during a call only |
 | `binary_sensor` In a call | on while you are in an audio/video conversation |
 | `binary_sensor` Someone in earshot | on while you hear someone |
 | `sensor` People in earshot | how many people you hear; attribute `names` lists them |
 
 Office events (nudges, knocks, people entering rooms, …) pushed by the relay are fired on the event bus as
-`better_kumo_event`, with the relay's event fields plus `config_entry_id`.
+`better_kumo_event`, with the relay's event fields plus `config_entry_id`. Events arrive only through the webhook;
+polling recovers state, not missed events.
 
 When the relay is unreachable, or Kumospace desktop is not connected to it, every entity is unavailable.
-`In a call` and the earshot entities stay `unknown` with a relay older than these fields.
+`In a call` and the earshot entities stay `unknown` with a relay older than these fields. Webhooks, earshot, the
+call fields and keeping the status message need a relay with
+[better-kumo-app#61](https://github.com/IgorKravtsov/better-kumo-app/pull/61).
 
 ## Install
 
@@ -53,7 +56,9 @@ relay, so changes arrive within a fraction of a second:
 - On startup and every 10 minutes the integration sends the relay an ordered list of URLs for its webhook: the
   override from the options (if set), the internal URL of Home Assistant (or its detected LAN address when no
   internal URL is set), then its external URL (if any). The relay uses the first that answers and falls back
-  through the rest, so a laptop away from home can still push through the external URL.
+  through the rest, so a laptop away from home can still push through the external URL. The relay does not
+  follow redirects, so each URL must reach Home Assistant directly (for example `https://`, not an `http://`
+  address that redirects to it).
 - Every delivery is signed with a per-entry secret (HMAC-SHA256). Deliveries with a bad signature, and state
   older than the last applied one, are dropped. Because of the signature the webhook accepts requests from outside
   the local network, which the external URL and Tailscale addresses (not "local" to Home Assistant) need.

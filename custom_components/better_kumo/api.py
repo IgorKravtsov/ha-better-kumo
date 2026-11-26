@@ -101,13 +101,9 @@ class RelayClient:
         """GET /v1/desktop."""
         return await self._object("GET", "/v1/desktop")
 
-    async def set_availability(self, availability: str, message: str) -> dict[str, Any]:
+    async def set_availability(self, availability: str) -> dict[str, Any]:
         """POST /v1/desktop/status."""
-        return await self._object(
-            "POST",
-            "/v1/desktop/status",
-            {"availability": availability, "message": message},
-        )
+        return await self._object("POST", "/v1/desktop/status", {"availability": availability})
 
     async def set_media(self, **media: bool) -> dict[str, Any]:
         """POST /v1/desktop/media with audio= and/or video=."""
