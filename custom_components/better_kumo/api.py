@@ -84,6 +84,31 @@ def idle_seconds(status: dict[str, Any]) -> int | None:
     return None
 
 
+# Remote error bodies may contain secrets, so messages use fixed text per status.
+DESKTOP_ERRORS = {
+    503: "Kumospace desktop is not connected to the relay, or not in a space",
+    404: "the relay runs with the desktop bridge disabled",
+}
+MEDIA_ERRORS = {**DESKTOP_ERRORS, 503: "Kumospace desktop is not in a call"}
+STATUS_ERRORS = {
+    400: "the relay rejected the request as invalid",
+    404: "the relay does not know this endpoint; update the relay",
+    503: "the relay is temporarily unavailable",
+}
+MEDIA_NAMES = {"audio": "microphone", "video": "camera"}
+
+
+def http_error(action: str, status: int, errors: dict[int, str] | None = None) -> str:
+    """A message for a non-2xx answer, from the status and the endpoint alone."""
+    if 300 <= status < 400:
+        reason = "the relay answered with a redirect; use the relay's own address"
+    else:
+        reason = (errors or {}).get(status) or STATUS_ERRORS.get(
+            status, "the relay answered with an error"
+        )
+    return f"{action} failed: {reason} (HTTP {status})"
+
+
 class RelayClient:
     """Thin async wrapper over the relay's /v1 endpoints."""
 
@@ -92,7 +117,15 @@ class RelayClient:
         self._url = url
         self._headers = {"Authorization": f"Bearer {secret}"}
 
-    async def _request(self, method: str, path: str, body: Any = None) -> Any:
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        body: Any = None,
+        *,
+        action: str,
+        errors: dict[int, str] | None = None,
+    ) -> Any:
         try:
             async with self._session.request(
                 method,
@@ -104,49 +137,99 @@ class RelayClient:
                 allow_redirects=False,
             ) as resp:
                 if resp.status == 401:
-                    raise RelayAuthError("wrong relay secret")
-                text = await resp.text()
+                    raise RelayAuthError(f"{action} failed: wrong relay secret (HTTP 401)")
                 if resp.status >= 300:
-                    raise RelayError(f"relay returned {resp.status}: {text.strip()[:200]}")
-        except (aiohttp.ClientError, TimeoutError, UnicodeDecodeError) as err:
-            raise RelayError(f"relay not reachable: {err}") from err
+                    raise RelayError(http_error(action, resp.status, errors))
+                # The relay sends UTF-8 JSON; a charset like base64 would raise LookupError.
+                text = await resp.text(encoding="utf-8")
+        except TimeoutError:
+            raise RelayError(f"{action} failed: relay not reachable: timed out") from None
+        except (aiohttp.ClientSSLError, aiohttp.ClientConnectorCertificateError) as err:
+            # TLS errors can quote the peer certificate.
+            raise RelayError(
+                f"{action} failed: relay not reachable: TLS error ({type(err).__name__})"
+            ) from None
+        except aiohttp.ClientConnectorError as err:
+            raise RelayError(f"{action} failed: relay not reachable: {err}") from err
+        except aiohttp.ClientError as err:
+            # Other aiohttp errors can quote a malformed reply's status line or headers.
+            raise RelayError(
+                f"{action} failed: relay not reachable ({type(err).__name__})"
+            ) from None
+        except UnicodeDecodeError:
+            raise RelayError(
+                f"{action} failed: unexpected reply from the relay: not UTF-8"
+            ) from None
         try:
             return json.loads(text) if text.strip() else None
-        except (ValueError, RecursionError) as err:
-            raise RelayError(f"unexpected reply from the relay: {err}") from err
+        except (ValueError, RecursionError):
+            raise RelayError(
+                f"{action} failed: unexpected reply from the relay: not JSON"
+            ) from None
 
-    async def _object(self, method: str, path: str, body: Any = None) -> dict[str, Any]:
-        reply = await self._request(method, path, body)
+    async def _object(
+        self, method: str, path: str, body: Any = None, **kwargs: Any
+    ) -> dict[str, Any]:
+        reply = await self._request(method, path, body, **kwargs)
         if not isinstance(reply, dict):
-            raise RelayError("unexpected reply from the relay: not a JSON object")
+            raise RelayError(
+                f"{kwargs['action']} failed: unexpected reply from the relay: not a JSON object"
+            )
         return reply
 
     async def status(self) -> dict[str, Any]:
         """GET /v1/status."""
-        return await self._object("GET", "/v1/status")
+        return await self._object("GET", "/v1/status", action="Reading the relay status")
 
-    async def _desktop(self, method: str, path: str, body: Any = None) -> dict[str, Any]:
-        state = await self._object(method, path, body)
+    async def _desktop(
+        self, method: str, path: str, body: Any = None, **kwargs: Any
+    ) -> dict[str, Any]:
+        state = await self._object(method, path, body, **kwargs)
         if not is_desktop_state(state):
-            raise RelayError("unexpected reply from the relay: malformed desktop state")
+            raise RelayError(
+                f"{kwargs['action']} failed: unexpected reply from the relay: "
+                "malformed desktop state"
+            )
         return state
 
     async def desktop(self) -> dict[str, Any]:
         """GET /v1/desktop."""
-        return await self._desktop("GET", "/v1/desktop")
+        return await self._desktop(
+            "GET", "/v1/desktop", action="Reading Kumospace", errors=DESKTOP_ERRORS
+        )
 
     async def set_availability(self, availability: str) -> dict[str, Any]:
         """POST /v1/desktop/status."""
-        return await self._desktop("POST", "/v1/desktop/status", {"availability": availability})
+        return await self._desktop(
+            "POST",
+            "/v1/desktop/status",
+            {"availability": availability},
+            action="Setting the Kumospace status",
+            errors=DESKTOP_ERRORS,
+        )
 
     async def set_media(self, **media: bool) -> dict[str, Any]:
         """POST /v1/desktop/media with audio= and/or video=."""
-        return await self._desktop("POST", "/v1/desktop/media", media)
+        turns = " and ".join(
+            f"the {MEDIA_NAMES.get(k, k)} {'on' if v else 'off'}" for k, v in media.items()
+        )
+        return await self._desktop(
+            "POST",
+            "/v1/desktop/media",
+            media,
+            action=f"Turning {turns}",
+            errors=MEDIA_ERRORS,
+        )
 
     async def put_webhook(self, hook_id: str, urls: list[str], secret: str) -> None:
         """PUT /v1/webhooks/{id}."""
-        await self._request("PUT", f"/v1/webhooks/{hook_id}", {"urls": urls, "secret": secret})
+        await self._request(
+            "PUT",
+            f"/v1/webhooks/{hook_id}",
+            {"urls": urls, "secret": secret},
+            action="Registering the webhook",
+        )
 
     async def delete_webhook(self, hook_id: str) -> None:
         """DELETE /v1/webhooks/{id}."""
-        await self._request("DELETE", f"/v1/webhooks/{hook_id}")
+        await self._request("DELETE", f"/v1/webhooks/{hook_id}", action="Removing the webhook")

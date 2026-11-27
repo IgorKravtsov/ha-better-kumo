@@ -105,6 +105,10 @@ entity except **At computer** and **Idle time** is unavailable.
 call fields and keeping the status message need a relay with
 [better-kumo-app#61](https://github.com/IgorKravtsov/better-kumo-app/pull/61).
 
+A failed switch or select shows a fixed message built from the action and the HTTP status, for example
+`Turning the microphone on failed: Kumospace desktop is not in a call (HTTP 503)`. Error answers' bodies never reach
+messages, logs or diagnostics; see [error messages](docs/relay-api.md#error-messages).
+
 ## Install
 
 1. HACS → ⋮ → **Custom repositories** → add `https://github.com/IgorKravtsov/ha-better-kumo`, category

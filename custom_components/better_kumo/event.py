@@ -118,8 +118,9 @@ class BetterKumoEvent(BetterKumoEntity, EventEntity):
             if (handled := self.convert(event)) is None:
                 return
             self._trigger_event(*handled)
-        except Exception:
-            _LOGGER.exception("Could not show relay event %r", event.get("kind"))
+        except Exception as err:
+            # The error text can quote event fields, which are remote text.
+            _LOGGER.error("Could not show a relay event: %s", type(err).__name__)
             return
         self.async_write_ha_state()
 
@@ -153,6 +154,6 @@ class OfficeEvents(BetterKumoEvent):
         if kind == MESSAGE:
             return None
         if kind not in OFFICE_EVENT_TYPES:
-            _LOGGER.debug("Unknown relay event kind %r, shown as %r", kind, OTHER)
+            _LOGGER.debug("Unknown relay event kind, shown as %r", OTHER)
             return OTHER, office_attributes(event)
         return kind, office_attributes(event)
