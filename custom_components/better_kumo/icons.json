@@ -4,6 +4,10 @@
       "in_call": { "default": "mdi:phone-off", "state": { "on": "mdi:phone-in-talk" } },
       "someone_in_earshot": { "default": "mdi:ear-hearing-off", "state": { "on": "mdi:ear-hearing" } }
     },
+    "event": {
+      "messages": { "default": "mdi:message-text" },
+      "office_events": { "default": "mdi:office-building" }
+    },
     "select": {
       "status_select": { "default": "mdi:account-circle" }
     },

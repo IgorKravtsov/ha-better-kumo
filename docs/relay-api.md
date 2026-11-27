@@ -127,10 +127,43 @@ Body:
   away, or runs but is not in a space (the same cases where `GET /v1/desktop` answers 503).
 - At relay start and after a new or changed registration, the relay sends the current `desktop` or
   `disconnected` on its next read, to every registered webhook.
-- `event` is sent for every entry the relay's event log records.
+- `event` is sent for every entry the relay's event log records. See [Events](#events) for its shape.
 - Delivery is fire-and-forget: 3 s timeout per URL attempt, redirects are not followed (the webhook URL must be the
   final address), and each webhook has a queue of 64 bodies; when it is full, new bodies are dropped. Missed
   `desktop` deliveries are covered by polling; missed `event` deliveries are lost.
+
+### Events
+
+`event` is a `LoggedEvent`: `seq` (the event log's own counter), `kind`, `at`, `person` `{user_id, name}`, and,
+depending on the kind, `room` `{id, name}`, `floor` `{id, name}`, `status`, `chat` and `text`. Empty strings and
+absent places are omitted.
+
+Office kinds (existing): `nudge`, `knock`, `entered_room`, `left_room`, `joined_floor`, `online`, `offline`,
+`status`, `nearby_chat`.
+
+**New** (better-kumo-app branch `relay-chat-events`): kind `message`, sent for every
+chat message in every channel (direct, group, public, threads) except my own.
+
+```json
+{ "seq": 9, "kind": "message", "at": 1764240000,
+  "person": { "user_id": "u2", "name": "Alice" },
+  "chat": "Design", "text": "Lunch?",
+  "channel": "<channel url>", "channel_type": "group", "mentions_me": true }
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `person` | `{user_id, name}` | the sender |
+| `chat` | `string` | the channel title |
+| `text` | `string` | the message text |
+| `channel` | `string`, optional | the channel url |
+| `channel_type` | `string`, optional | for example `direct`, `group` or `public` |
+| `mentions_me` | `bool`, optional | the message mentions me; omitted when false |
+| `thread` | `bool`, optional | the message is a thread reply; omitted when false |
+
+The integration fires every `event` delivery as `better_kumo_event` unchanged. It also shows `message` on the
+Messages entity and the other kinds on the Office events entity, where kinds it does not know become `other`; the
+relay may add kinds without breaking it.
 
 ## Polling
 

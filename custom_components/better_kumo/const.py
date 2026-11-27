@@ -19,3 +19,21 @@ EVENT_BETTER_KUMO = "better_kumo_event"
 
 AVAILABILITIES = ["available", "away", "focusing"]
 CONF_SECRET = "secret"
+
+# Event kinds shown by the Office events entity; anything else but `message` becomes `other`.
+OFFICE_EVENT_TYPES = (
+    "nudge",
+    "knock",
+    "entered_room",
+    "left_room",
+    "joined_floor",
+    "online",
+    "offline",
+    "status",
+    "nearby_chat",
+)
+
+
+def signal_event(entry_id: str) -> str:
+    """Dispatcher signal carrying each new relay event of a config entry."""
+    return f"{DOMAIN}_event_{entry_id}"

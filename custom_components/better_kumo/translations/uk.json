@@ -54,6 +54,93 @@
         "name": "Когось чути поруч"
       }
     },
+    "event": {
+      "messages": {
+        "name": "Повідомлення",
+        "state_attributes": {
+          "event_type": {
+            "name": "Тип події",
+            "state": {
+              "message": "Повідомлення"
+            }
+          },
+          "sender": {
+            "name": "Відправник"
+          },
+          "sender_id": {
+            "name": "ID відправника"
+          },
+          "chat": {
+            "name": "Чат"
+          },
+          "text": {
+            "name": "Текст"
+          },
+          "channel": {
+            "name": "Канал"
+          },
+          "channel_type": {
+            "name": "Тип каналу"
+          },
+          "mentions_me": {
+            "name": "Згадує мене"
+          },
+          "thread": {
+            "name": "У треді"
+          },
+          "at": {
+            "name": "Час"
+          }
+        }
+      },
+      "office_events": {
+        "name": "Події в офісі",
+        "state_attributes": {
+          "event_type": {
+            "name": "Тип події",
+            "state": {
+              "nudge": "Штурхнули",
+              "knock": "Стук",
+              "entered_room": "Зайшов у кімнату",
+              "left_room": "Вийшов з кімнати",
+              "joined_floor": "Перейшов на поверх",
+              "online": "У мережі",
+              "offline": "Не в мережі",
+              "status": "Змінив статус",
+              "nearby_chat": "Чат поруч",
+              "other": "Інше"
+            }
+          },
+          "kind": {
+            "name": "Вид"
+          },
+          "person": {
+            "name": "Людина"
+          },
+          "person_id": {
+            "name": "ID людини"
+          },
+          "room": {
+            "name": "Кімната"
+          },
+          "floor": {
+            "name": "Поверх"
+          },
+          "status": {
+            "name": "Статус"
+          },
+          "chat": {
+            "name": "Чат"
+          },
+          "text": {
+            "name": "Текст"
+          },
+          "at": {
+            "name": "Час"
+          }
+        }
+      }
+    },
     "select": {
       "status_select": {
         "name": "Статус",

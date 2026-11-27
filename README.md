@@ -17,10 +17,52 @@ One device, **Kumospace**, per relay:
 | `binary_sensor` In a call | on while you are in an audio/video conversation |
 | `binary_sensor` Someone in earshot | on while you hear someone |
 | `sensor` People in earshot | how many people you hear; attribute `names` lists them |
+| `event` Messages | a chat message from someone else, in any channel (direct, group, public, threads) |
+| `event` Office events | nudges, knocks, people entering or leaving rooms, joining a floor, going online or offline, changing status, nearby chat |
 
-Office events (nudges, knocks, people entering rooms, …) pushed by the relay are fired on the event bus as
-`better_kumo_event`, with the relay's event fields plus `config_entry_id`. Events arrive only through the webhook;
-polling recovers state, not missed events.
+## Events
+
+Every event the relay pushes (chat messages and office events) is fired on the event bus as `better_kumo_event`,
+with the relay's event fields plus `config_entry_id`, and is shown by one of two event entities. Events arrive only
+through the webhook, each `(boot, seq)` once; polling recovers state, not missed events, and never triggers the
+event entities.
+
+- **Messages** (`event.kumospace_messages`), event type `message`. Attributes: `sender`, `sender_id`, `chat` (the
+  channel title), `text`, `channel` (the channel url), `channel_type` (as the relay sends it, for example `direct`,
+  `group` or `public`), `mentions_me`, `thread` and `at`. Filter on the attributes in a condition, for example
+  `mentions_me` is `true` or `channel_type` is `direct`. Your own messages are not sent by the relay.
+- **Office events** (`event.kumospace_office_events`), one event type per kind: `nudge`, `knock`,
+  `entered_room`, `left_room`, `joined_floor`, `online`, `offline`, `status`, `nearby_chat`. A kind this version
+  does not know (from a newer relay) shows as `other`. Attributes: `kind`, `person`, `person_id`, `room`, `floor`,
+  `status`, `chat`, `text` and `at`, each only when the event has it.
+
+Attributes are capped so the recorder keeps them (it drops state attributes over 16 KiB): `text` to 1024
+characters and every other string to 255, cut ones ending in `…`. `better_kumo_event` keeps the full text.
+
+The event entities are unavailable when the other entities are. An event that arrives meanwhile is kept and shown
+when they come back, so an automation that triggers on the entity's state should ignore changes from
+`unavailable`. The last event is restored after a restart.
+
+Example: notify on a direct message or a mention.
+
+```yaml
+triggers:
+  - trigger: state
+    entity_id: event.kumospace_messages
+    not_from: [unavailable, unknown]
+conditions:
+  - condition: template
+    value_template: >-
+      {{ trigger.to_state.attributes.mentions_me
+         or trigger.to_state.attributes.channel_type == 'direct' }}
+actions:
+  - action: notify.notify
+    data:
+      title: "{{ trigger.to_state.attributes.sender }}"
+      message: "{{ trigger.to_state.attributes.text }}"
+```
+
+## Availability
 
 When the relay is unreachable, or Kumospace desktop is not connected to it, every entity is unavailable.
 `In a call` and the earshot entities stay `unknown` with a relay older than these fields. Webhooks, earshot, the
