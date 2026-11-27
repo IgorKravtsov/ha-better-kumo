@@ -102,13 +102,12 @@ class BetterKumoConfigFlow(ConfigFlow, domain=DOMAIN):
                     # The relay serves exactly one Kumospace account; its uid is
                     # stable across relay address changes (LAN vs Tailscale).
                     await self.async_set_unique_id(str(status.get("uid") or url))
-                    updates = {CONF_URL: url, CONF_SECRET: secret}
-                    existing = self.hass.config_entries.async_entry_for_domain_unique_id(
-                        DOMAIN, self.unique_id
-                    )
-                    # The old relay may be offline for the DELETE and keep the registration.
-                    if existing and existing.data[CONF_URL] != url:
-                        updates[CONF_WEBHOOK_SECRET] = secrets.token_hex(32)
+                    # The old relay may miss the DELETE (offline, or replaced at the same address).
+                    updates = {
+                        CONF_URL: url,
+                        CONF_SECRET: secret,
+                        CONF_WEBHOOK_SECRET: secrets.token_hex(32),
+                    }
                     self._abort_if_unique_id_configured(updates=updates)
                     return self.async_create_entry(
                         title="Kumospace",

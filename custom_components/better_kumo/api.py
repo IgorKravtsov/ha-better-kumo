@@ -70,6 +70,7 @@ def is_desktop_state(state: Any) -> bool:
         and isinstance(state.get("self") or {}, dict)
         and list_of(state.get("zones"), dict)
         and list_of(state.get("people"), dict)
+        and all(isinstance(p.get("id"), str) for p in state.get("people") or [])
         and list_of(state.get("earshot"), str)
     )
 

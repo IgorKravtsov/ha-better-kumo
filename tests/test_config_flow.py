@@ -123,20 +123,20 @@ async def test_relay_errors(
     assert result["errors"] == {"base": error}
 
 
+@pytest.mark.parametrize("url", ["http://100.64.0.1:8787", RELAY])
 async def test_repairing_updates_the_entry(
-    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry, url: str
 ) -> None:
     await setup_entry(hass, config_entry)
-    relay.get("http://100.64.0.1:8787/v1/status", json={"uid": "uid-1"})
+    relay.get(f"{url}/v1/status", json={"uid": "uid-1"})
     result = await _start(hass)
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_URL: "http://100.64.0.1:8787", CONF_SECRET: "new"}
+        result["flow_id"], {CONF_URL: url, CONF_SECRET: "new"}
     )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
-    assert config_entry.data[CONF_URL] == "http://100.64.0.1:8787"
+    assert config_entry.data[CONF_URL] == url
     assert config_entry.data[CONF_SECRET] == "new"
-    # A new relay address gets a new signing secret: the old relay may keep its registration.
     assert config_entry.data[CONF_WEBHOOK_SECRET] != WEBHOOK_SECRET
 
 
