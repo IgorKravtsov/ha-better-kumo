@@ -618,3 +618,59 @@ async def test_diagnostics_after_failed_reads(
     diag = await get_diagnostics_for_config_entry(hass, hass_client, config_entry)
     assert diag["last_update_success"] is False
     assert diag["desktop"] is None
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
+    aioclient_mock.get(f"{RELAY}/v1/status", json=relay_status())
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    await config_entry.runtime_data.async_refresh()
+    await config_entry.runtime_data.status.async_refresh()
+    diag = await get_diagnostics_for_config_entry(hass, hass_client, config_entry)
+    assert diag["last_error"] is None
+    assert diag["status_error"] is None
+    assert diag["idle_seconds"] == 12
+
+
+async def test_stalled_status_does_not_delay_setup(
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    gate = asyncio.Event()
+
+    async def stalled(_self):
+        await gate.wait()
+        return relay_status()
+
+    config_entry.add_to_hass(hass)
+    with patch("custom_components.better_kumo.api.RelayClient.status", stalled):
+        assert await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+        assert hass.states.get("sensor.kumospace_status").state == "available"
+        assert any(c[0] == "PUT" for c in relay.mock_calls)
+        assert hass.states.get(AT_COMPUTER).state == "unknown"
+        gate.set()
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(AT_COMPUTER).state == "on"
+
+
+async def test_overlapping_status_reads_are_serialized(
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    # HA 2025.8 does not serialize async_refresh, so the coordinator's own read must.
+    await setup_entry(hass, config_entry)
+    status = config_entry.runtime_data.status
+    gate = asyncio.Event()
+    started = []
+
+    async def read():
+        started.append(len(started))
+        await gate.wait()
+        return relay_status()
+
+    with patch.object(status.client, "status", side_effect=read):
+        first = hass.async_create_task(status._async_update_data())
+        second = hass.async_create_task(status._async_update_data())
+        await asyncio.sleep(0.01)
+        assert started == [0]
+        gate.set()
+        await asyncio.gather(first, second)
+    assert started == [0, 1]

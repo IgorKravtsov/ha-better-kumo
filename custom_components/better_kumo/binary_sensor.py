@@ -25,7 +25,7 @@ async def async_setup_entry(
         [
             InCallSensor(coordinator, "in_call"),
             EarshotSensor(coordinator, "someone_in_earshot"),
-            AtComputerSensor(coordinator, "at_computer"),
+            AtComputerSensor(coordinator.status, "at_computer"),
         ]
     )
 

@@ -110,9 +110,12 @@ class StatusCoordinator(DataUpdateCoordinator[int | None]):
             hass, _LOGGER, config_entry=entry, name=f"{DOMAIN} status", update_interval=interval
         )
         self.client = client
+        self._read_lock = asyncio.Lock()
 
     async def _async_update_data(self) -> int | None:
-        try:
-            return idle_seconds(await self.client.status())
-        except RelayError as err:
-            raise UpdateFailed(str(err)) from err
+        # HA 2025.8 does not serialize polls with async_refresh; an older sample must not land last.
+        async with self._read_lock:
+            try:
+                return idle_seconds(await self.client.status())
+            except RelayError as err:
+                raise UpdateFailed(str(err)) from err

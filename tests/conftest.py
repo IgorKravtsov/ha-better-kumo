@@ -107,4 +107,4 @@ async def setup_entry(hass: HomeAssistant, entry: MockConfigEntry) -> None:
     if hass.config_entries.async_get_entry(entry.entry_id) is None:
         entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)

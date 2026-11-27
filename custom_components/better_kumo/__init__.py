@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from homeassistant.const import CONF_URL, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -32,7 +30,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: BetterKumoConfigEntry) -
     receiver = coordinator.receiver = WebhookReceiver(hass, entry, coordinator)
     # Not async_config_entry_first_refresh: a relay or desktop that is down at
     # startup should give unavailable entities, not a setup retry loop.
-    await asyncio.gather(coordinator.async_refresh(), coordinator.status.async_refresh())
+    await coordinator.async_refresh()
+    # Off the setup path: a stalled GET /v1/status must not hold back the other entities.
+    entry.async_create_background_task(
+        hass, coordinator.status.async_refresh(), "better_kumo status refresh"
+    )
     entry.runtime_data = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

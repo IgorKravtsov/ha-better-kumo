@@ -26,7 +26,7 @@ async def async_setup_entry(
             StatusSensor(coordinator, "status"),
             RoomSensor(coordinator, "room"),
             EarshotCountSensor(coordinator, "earshot_count"),
-            IdleTimeSensor(coordinator, "idle_time"),
+            IdleTimeSensor(coordinator.status, "idle_time"),
         ]
     )
 
