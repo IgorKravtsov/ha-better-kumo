@@ -33,4 +33,4 @@ class StatusSelect(BetterKumoEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Change status; the relay keeps the current status message."""
-        await self._command(self.coordinator.client.set_availability(option))
+        await self._command(lambda: self.coordinator.client.set_availability(option))

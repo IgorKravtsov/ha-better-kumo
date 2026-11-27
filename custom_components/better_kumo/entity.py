@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from homeassistant.exceptions import HomeAssistantError
@@ -45,11 +45,11 @@ class BetterKumoEntity(CoordinatorEntity[BetterKumoCoordinator]):
         """The `self` part of DesktopState."""
         return self.state_data.get("self") or {}
 
-    async def _command(self, request: Awaitable[dict[str, Any]]) -> None:
+    async def _command(self, request: Callable[[], Awaitable[dict[str, Any]]]) -> None:
         try:
             # Each reply is a full snapshot, so an older one must not land after a newer one.
             async with self.coordinator.command_lock:
-                self.coordinator.async_apply(await request)
+                self.coordinator.async_apply(await request())
         except RelayError as err:
             raise HomeAssistantError(f"Better Kumo relay: {err}") from err
         finally:

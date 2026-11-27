@@ -42,8 +42,8 @@ class MediaSwitch(BetterKumoEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on."""
-        await self._command(self.coordinator.client.set_media(**{self._field: True}))
+        await self._command(lambda: self.coordinator.client.set_media(**{self._field: True}))
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off."""
-        await self._command(self.coordinator.client.set_media(**{self._field: False}))
+        await self._command(lambda: self.coordinator.client.set_media(**{self._field: False}))

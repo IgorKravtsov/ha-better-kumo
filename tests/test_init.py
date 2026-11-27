@@ -381,9 +381,31 @@ async def test_commands_apply_replies_in_order(
             )
         )
         await asyncio.sleep(0)
-        status.assert_not_awaited()
+        status.assert_not_called()
         gate.set()
         await mic
         await select
         assert hass.states.get("sensor.kumospace_status").state == "away"
         await hass.async_block_till_done(wait_background_tasks=True)
+
+
+async def test_cancelled_queued_command_is_never_sent(
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    await setup_entry(hass, config_entry)
+    coordinator = config_entry.runtime_data
+    with patch.object(coordinator.client, "set_media") as media:
+        async with coordinator.command_lock:
+            task = hass.async_create_task(
+                hass.services.async_call(
+                    "switch",
+                    "turn_off",
+                    {"entity_id": "switch.kumospace_microphone"},
+                    blocking=True,
+                )
+            )
+            await asyncio.sleep(0)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+    media.assert_not_called()
