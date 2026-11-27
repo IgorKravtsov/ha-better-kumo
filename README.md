@@ -69,8 +69,8 @@ actions:
 
 **At computer** (`binary_sensor.kumospace_at_computer`, device class `occupancy`: on is "Detected") is on while the
 relay's computer had keyboard, mouse or trackpad input less than **Away after idle** seconds ago (option, default
-300). It comes from `idle_seconds` in the relay's `GET /v1/status`, read together with `GET /v1/desktop` on every
-poll and after every webhook signal, so it follows the poll interval: with the default 30 s it turns on or off up to
+300). It comes from `idle_seconds` in the relay's `GET /v1/status`, polled on its own at the poll interval (webhooks
+never carry it), so it follows the poll interval: with the default 30 s it turns on or off up to
 30 s late. It uses occupancy rather than presence because presence reads Home / Away, which would be mistaken for
 being at home.
 
@@ -130,12 +130,12 @@ home. Pairing again with a new address or secret updates the existing entry.
 
 ## Push and polling
 
-Home Assistant polls `GET /v1/desktop` and `GET /v1/status` (for the idle time) together at the poll interval,
-always. On top of that it registers a webhook in the
+Home Assistant polls `GET /v1/desktop` and, separately, `GET /v1/status` (for the idle time) at the poll interval,
+always; neither waits for the other. On top of that it registers a webhook in the
 relay, so changes show up within a fraction of a second:
 
 - A state delivery (`desktop` or `disconnected`) only tells Home Assistant that the state changed. It ignores the
-  snapshot in the body and reads `GET /v1/desktop` and `GET /v1/status` right away, in parallel; bursts of
+  snapshot in the body and reads `GET /v1/desktop` right away; bursts of
   deliveries share one read. The read decides availability: if it fails, entities become unavailable. So a push
   helps only while Home Assistant can reach the relay; when it cannot, polling fails too and entities are
   unavailable. After every command the integration also reads the state again.

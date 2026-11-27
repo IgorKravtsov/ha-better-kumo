@@ -126,6 +126,7 @@ async def test_unreachable_relay_makes_everything_unavailable(
     for entity_id in [*ENTITIES, AT_COMPUTER]:
         assert hass.states.get(entity_id).state == STATE_UNAVAILABLE, entity_id
     assert config_entry.runtime_data.last_update_success is False
+    assert config_entry.runtime_data.status.last_update_success is False
 
 
 async def test_at_computer_follows_idle_time_and_option(
@@ -154,7 +155,7 @@ async def test_at_computer_follows_idle_time_and_option(
         ({"idle_seconds": "5"}, "unknown"),
     ):
         answer(**status)
-        await config_entry.runtime_data.async_refresh()
+        await config_entry.runtime_data.status.async_refresh()
         await hass.async_block_till_done()
         assert hass.states.get(AT_COMPUTER).state == state, status
 
@@ -296,7 +297,8 @@ async def test_diagnostics_redacts_secrets(
     assert WEBHOOK_SECRET not in text
     assert diag["webhook"]["urls"] == ["http://homeassistant.local:8123/api/webhook/hook-1"]
     assert diag["desktop"]["self"]["zoneId"] == "z1"
-    assert diag["relay_ok"] is True
+    assert diag["status_ok"] is True
+    assert diag["status_error"] is None
     assert diag["idle_seconds"] == 12
     assert "Alice" not in text
     assert "hi" not in str(diag["desktop"]["self"])
@@ -538,23 +540,81 @@ async def test_repair_during_setup_keeps_the_old_key_for_the_old_relay(
     assert puts[0][2]["secret"] == WEBHOOK_SECRET
 
 
-async def test_command_during_a_read_keeps_that_reads_failed_status(
+async def test_stalled_status_does_not_delay_desktop(
     hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
 ) -> None:
     await setup_entry(hass, config_entry)
-    assert hass.states.get(AT_COMPUTER).state == "on"
     coordinator = config_entry.runtime_data
     gate = asyncio.Event()
 
-    async def slow_failure():
+    async def stalled():
         await gate.wait()
-        raise RelayError("relay not reachable")
+        return relay_status()
 
-    with patch.object(coordinator.client, "status", side_effect=slow_failure):
-        task = hass.async_create_task(coordinator.async_refresh())
-        await asyncio.sleep(0)
-        coordinator.async_apply(desktop_state(inCall=True))
+    relay.clear_requests()
+    relay.get(f"{RELAY}/v1/desktop", json=desktop_state(inCall=True))
+    relay.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    with patch.object(coordinator.client, "status", side_effect=stalled):
+        status_read = hass.async_create_task(coordinator.status.async_refresh())
+        await coordinator.async_refresh()
+        assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
         gate.set()
-        await task
+        await status_read
+
+
+async def test_command_reply_does_not_revive_failed_status(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
+    aioclient_mock.get(f"{RELAY}/v1/status", json=relay_status())
+    aioclient_mock.put(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    await setup_entry(hass, config_entry)
+    assert hass.states.get(AT_COMPUTER).state == "on"
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{RELAY}/v1/desktop", exc=TimeoutError())
+    aioclient_mock.get(f"{RELAY}/v1/status", exc=TimeoutError())
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    coordinator = config_entry.runtime_data
+    await coordinator.async_refresh()
+    await coordinator.status.async_refresh()
+    assert hass.states.get(AT_COMPUTER).state == STATE_UNAVAILABLE
+
+    coordinator.async_apply(desktop_state(inCall=True))
+    await hass.async_block_till_done()
     assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
     assert hass.states.get(AT_COMPUTER).state == STATE_UNAVAILABLE
+
+
+async def test_diagnostics_after_failed_reads(
+    hass: HomeAssistant,
+    hass_client,
+    aioclient_mock: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+) -> None:
+    aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
+    aioclient_mock.get(f"{RELAY}/v1/status", json=relay_status())
+    aioclient_mock.put(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    await setup_entry(hass, config_entry)
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
+    aioclient_mock.get(f"{RELAY}/v1/status", status=401)
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    await config_entry.runtime_data.status.async_refresh()
+    diag = await get_diagnostics_for_config_entry(hass, hass_client, config_entry)
+    assert diag["last_update_success"] is True
+    assert diag["desktop"] is not None
+    assert diag["status_ok"] is False
+    assert diag["status_error"] == "wrong relay secret"
+    assert diag["idle_seconds"] is None
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{RELAY}/v1/desktop", exc=TimeoutError())
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    await config_entry.runtime_data.async_refresh()
+    diag = await get_diagnostics_for_config_entry(hass, hass_client, config_entry)
+    assert diag["last_update_success"] is False
+    assert diag["desktop"] is None

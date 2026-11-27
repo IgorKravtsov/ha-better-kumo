@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, replace
 from datetime import timedelta
 import logging
 from typing import TYPE_CHECKING, Any
@@ -23,18 +22,8 @@ _LOGGER = logging.getLogger(__name__)
 type BetterKumoConfigEntry = ConfigEntry[BetterKumoCoordinator]
 
 
-@dataclass(frozen=True, slots=True)
-class RelayData:
-    """What one read learned from the relay."""
-
-    desktop: dict[str, Any] | None = None
-    desktop_error: str | None = None
-    relay_ok: bool = False
-    idle_seconds: int | None = None
-
-
-class BetterKumoCoordinator(DataUpdateCoordinator[RelayData]):
-    """Holds the last read; None data means never fetched."""
+class BetterKumoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+    """Holds the last DesktopState; None data means never fetched."""
 
     config_entry: BetterKumoConfigEntry
 
@@ -57,36 +46,32 @@ class BetterKumoCoordinator(DataUpdateCoordinator[RelayData]):
         self._read_lock = asyncio.Lock()
         self.command_lock = asyncio.Lock()
         self.receiver: WebhookReceiver | None = None
+        self.status = StatusCoordinator(hass, entry, client, self.update_interval)
 
-    async def _async_update_data(self) -> RelayData:
+    async def _async_update_data(self) -> dict[str, Any]:
         # HA 2025.8 does not serialize scheduled polls with async_refresh.
         async with self._read_lock:
             # This read sees every change signalled before it started.
             self._stale = False
             generation = self.generation
-            desktop, status = await asyncio.gather(
-                self.client.desktop(), self.client.status(), return_exceptions=True
-            )
-            for result in (desktop, status):
-                if isinstance(result, BaseException) and not isinstance(result, RelayError):
-                    raise result
-            relay_ok = isinstance(status, dict)
-            idle = idle_seconds(status) if isinstance(status, dict) else None
+            try:
+                data = await self.client.desktop()
+            except RelayError as err:
+                if generation != self.generation and self.last_update_success:
+                    return self.data
+                raise UpdateFailed(str(err)) from err
             # A command reply landed while this read was in flight; the read may predate it.
-            if generation != self.generation and self.data is not None:
-                return replace(self.data, relay_ok=relay_ok, idle_seconds=idle)
-            if isinstance(desktop, RelayError):
-                # Only a relay that answers neither is down; Kumospace alone being away is not.
-                if not relay_ok:
-                    raise UpdateFailed(str(desktop)) from desktop
-                return RelayData(desktop_error=str(desktop), relay_ok=True, idle_seconds=idle)
-            return RelayData(desktop=desktop, relay_ok=relay_ok, idle_seconds=idle)
+            if generation != self.generation:
+                if not self.last_update_success:
+                    raise UpdateFailed(str(self.last_exception))
+                return self.data
+            return data
 
     @callback
     def async_apply(self, data: dict[str, Any]) -> None:
         """Apply a command-returned state, keeping the poll timer running."""
         self.generation += 1
-        self.data = replace(self.data or RelayData(), desktop=data, desktop_error=None)
+        self.data = data
         self.last_update_success = True
         self.last_exception = None
         self.async_update_listeners()
@@ -104,3 +89,30 @@ class BetterKumoCoordinator(DataUpdateCoordinator[RelayData]):
         # After shutdown async_refresh returns without reading or yielding.
         while self._stale and not self._shutdown_requested:
             await self.async_refresh()
+
+
+class StatusCoordinator(DataUpdateCoordinator[int | None]):
+    """Polls GET /v1/status on its own, so neither endpoint waits for the other.
+
+    Data is the relay computer's idle seconds, None when the relay can't tell.
+    """
+
+    config_entry: BetterKumoConfigEntry
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: BetterKumoConfigEntry,
+        client: RelayClient,
+        interval: timedelta | None,
+    ) -> None:
+        super().__init__(
+            hass, _LOGGER, config_entry=entry, name=f"{DOMAIN} status", update_interval=interval
+        )
+        self.client = client
+
+    async def _async_update_data(self) -> int | None:
+        try:
+            return idle_seconds(await self.client.status())
+        except RelayError as err:
+            raise UpdateFailed(str(err)) from err

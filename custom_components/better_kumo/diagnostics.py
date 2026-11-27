@@ -22,7 +22,7 @@ async def async_get_config_entry_diagnostics(
     """Return diagnostics, including the webhook URLs for manual registration."""
     coordinator = entry.runtime_data
     receiver = coordinator.receiver
-    data = coordinator.data
+    status = coordinator.status
     return {
         "entry": {
             "data": async_redact_data(dict(entry.data), TO_REDACT),
@@ -35,10 +35,11 @@ async def async_get_config_entry_diagnostics(
         },
         "last_update_success": coordinator.last_update_success,
         "last_error": str(coordinator.last_exception) if coordinator.last_exception else None,
-        "desktop": async_redact_data(data.desktop, DESKTOP_REDACT)
-        if data and data.desktop
+        # HA keeps the last data after a failed read; report only what the last read returned.
+        "desktop": async_redact_data(coordinator.data, DESKTOP_REDACT)
+        if coordinator.last_update_success and coordinator.data
         else None,
-        "desktop_error": data.desktop_error if data else None,
-        "relay_ok": data.relay_ok if data else False,
-        "idle_seconds": data.idle_seconds if data else None,
+        "status_ok": status.last_update_success,
+        "status_error": str(status.last_exception) if status.last_exception else None,
+        "idle_seconds": status.data if status.last_update_success else None,
     }

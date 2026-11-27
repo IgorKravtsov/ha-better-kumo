@@ -28,7 +28,7 @@ the request body, which can carry the webhook secret), so a 3xx answer counts as
 ### `GET /v1/status` (existing, extended)
 
 The relay's own status (snake_case JSON). The config flow reads `uid` from it as the entry's unique id. Polling
-reads it together with `GET /v1/desktop` for one field:
+reads it on its own, independently of `GET /v1/desktop`, for one field:
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -57,7 +57,7 @@ Errors are non-2xx answers:
 | 404 | the relay runs with the desktop bridge disabled |
 
 The integration treats any error the same way: every entity except **At computer** and **Idle time** becomes
-unavailable. Those two follow `GET /v1/status`; when both reads fail (the relay is unreachable), every entity is
+unavailable. Those two follow only `GET /v1/status`; when both reads fail (the relay is unreachable), every entity is
 unavailable.
 
 **New fields:**
@@ -136,7 +136,7 @@ Body:
   by every URL), and a webhook registered later starts above 1. The integration drops bodies with a bad signature
   or envelope and uses `(boot, seq)` only to fire a redelivered `event` once.
 - `desktop` and `disconnected` are signals for this integration: it ignores the snapshot in the body and reads
-  `GET /v1/desktop` (and `GET /v1/status`) right away (one extra LAN round trip; bodies that arrive while a read is in flight cause one
+  `GET /v1/desktop` right away (one extra LAN round trip; bodies that arrive while a read is in flight cause one
   more read after it). Bodies and HTTP replies share no revision, so applying a delayed body could undo a newer
   read. Availability comes from that read: a failed read makes entities unavailable. If Home Assistant cannot reach
   the relay, pushes do not help, since polling fails too and entities stay unavailable.
@@ -188,7 +188,8 @@ relay may add kinds without breaking it.
 
 ## Polling
 
-The integration polls `GET /v1/desktop` and `GET /v1/status` in parallel on a configurable interval (1–3600 s,
-default 30 s) whether or not webhooks work, and reads both again after every `desktop` or `disconnected` delivery.
-If `GET /v1/desktop` fails, the Kumospace entities become unavailable; if `GET /v1/status` fails, **At computer**
-and **Idle time** do; if both fail, the relay counts as unreachable.
+The integration polls `GET /v1/desktop` and `GET /v1/status` independently on a configurable interval (1–3600 s,
+default 30 s) whether or not webhooks work, and reads `GET /v1/desktop` again after every `desktop` or
+`disconnected` delivery. If `GET /v1/desktop` fails, the Kumospace entities become unavailable; if `GET /v1/status`
+fails, **At computer** and **Idle time** do. Neither read waits for the other, and a command reply touches only the
+Kumospace entities.

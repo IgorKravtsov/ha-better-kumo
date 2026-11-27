@@ -70,11 +70,9 @@ async def test_desktop_signal_reads_the_relay(
     hass: HomeAssistant, post, relay: AiohttpClientMocker
 ) -> None:
     reads = desktop_reads(relay)
-    status_reads = sum(1 for c in relay.mock_calls if str(c[1]).endswith("/v1/status"))
     body = {"boot": "b1", "seq": 1, "kind": "desktop", "desktop": desktop_state(inCall=True)}
     assert await post(body) == 200
     assert desktop_reads(relay) == reads + 1
-    assert sum(1 for c in relay.mock_calls if str(c[1]).endswith("/v1/status")) == status_reads + 1
     assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
 
 
