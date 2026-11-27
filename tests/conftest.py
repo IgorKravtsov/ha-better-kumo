@@ -53,6 +53,25 @@ def desktop_state(**overrides: Any) -> dict[str, Any]:
     return state
 
 
+def relay_status(**overrides: Any) -> dict[str, Any]:
+    """A RelayStatus as GET /v1/status returns it."""
+    status: dict[str, Any] = {
+        "uid": "uid-1",
+        "enabled": True,
+        "online": True,
+        "ntfy": False,
+        "apns": False,
+        "devices": 1,
+        "desktop": True,
+        "api": 3,
+        "version": "0.2.17",
+        "agents": True,
+        "idle_seconds": 12,
+    }
+    status.update(overrides)
+    return status
+
+
 @pytest.fixture
 def config_entry() -> MockConfigEntry:
     """A paired relay."""
@@ -76,6 +95,7 @@ def relay(
 ) -> AiohttpClientMocker:
     """A healthy relay."""
     aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
+    aioclient_mock.get(f"{RELAY}/v1/status", json=relay_status())
     hook = f"{RELAY}/v1/webhooks/{config_entry.entry_id}"
     aioclient_mock.put(hook, json={"id": config_entry.entry_id, "urls": []})
     aioclient_mock.delete(hook, status=204)
@@ -87,4 +107,4 @@ async def setup_entry(hass: HomeAssistant, entry: MockConfigEntry) -> None:
     if hass.config_entries.async_get_entry(entry.entry_id) is None:
         entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)

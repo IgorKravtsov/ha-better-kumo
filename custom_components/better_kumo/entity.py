@@ -11,15 +11,15 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import RelayError
 from .const import DOMAIN
-from .coordinator import BetterKumoCoordinator
+from .coordinator import BetterKumoCoordinator, StatusCoordinator
 
 
-class BetterKumoEntity(CoordinatorEntity[BetterKumoCoordinator]):
+class KumospaceDeviceEntity[C: BetterKumoCoordinator | StatusCoordinator](CoordinatorEntity[C]):
     """An entity of the one Kumospace device of a relay."""
 
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator: BetterKumoCoordinator, key: str) -> None:
+    def __init__(self, coordinator: C, key: str) -> None:
         super().__init__(coordinator)
         entry = coordinator.config_entry
         self._attr_translation_key = key
@@ -29,6 +29,10 @@ class BetterKumoEntity(CoordinatorEntity[BetterKumoCoordinator]):
             name="Kumospace",
             manufacturer="Better Kumo",
         )
+
+
+class BetterKumoEntity(KumospaceDeviceEntity[BetterKumoCoordinator]):
+    """An entity that reads the DesktopState."""
 
     @property
     def available(self) -> bool:
@@ -55,3 +59,12 @@ class BetterKumoEntity(CoordinatorEntity[BetterKumoCoordinator]):
         finally:
             # The reply has no revision and a failed request may still have acted.
             self.coordinator.async_invalidate()
+
+
+class RelayEntity(KumospaceDeviceEntity[StatusCoordinator]):
+    """An entity about the relay's computer, following GET /v1/status alone."""
+
+    @property
+    def idle_seconds(self) -> int | None:
+        """Seconds since the last input on the relay's computer."""
+        return self.coordinator.data

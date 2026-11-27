@@ -31,6 +31,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: BetterKumoConfigEntry) -
     # Not async_config_entry_first_refresh: a relay or desktop that is down at
     # startup should give unavailable entities, not a setup retry loop.
     await coordinator.async_refresh()
+    # Off the setup path: a stalled GET /v1/status must not hold back the other entities.
+    entry.async_create_background_task(
+        hass, coordinator.status.async_refresh(), "better_kumo status refresh"
+    )
     entry.runtime_data = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

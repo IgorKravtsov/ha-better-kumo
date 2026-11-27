@@ -1,17 +1,17 @@
-"""Sensors: status, room, people in earshot."""
+"""Sensors: status, room, people in earshot, idle time."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.const import MAX_LENGTH_STATE_STATE
+from homeassistant.const import MAX_LENGTH_STATE_STATE, EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import AVAILABILITIES
 from .coordinator import BetterKumoConfigEntry
-from .entity import BetterKumoEntity
+from .entity import BetterKumoEntity, RelayEntity
 
 
 async def async_setup_entry(
@@ -26,6 +26,7 @@ async def async_setup_entry(
             StatusSensor(coordinator, "status"),
             RoomSensor(coordinator, "room"),
             EarshotCountSensor(coordinator, "earshot_count"),
+            IdleTimeSensor(coordinator.status, "idle_time"),
         ]
     )
 
@@ -73,3 +74,18 @@ class EarshotCountSensor(BetterKumoEntity, SensorEntity):
         """Names of the people in earshot."""
         names = {p.get("id"): p.get("name") for p in self.state_data.get("people") or []}
         return {"names": [names.get(i) or i for i in self.state_data.get("earshot") or []]}
+
+
+class IdleTimeSensor(RelayEntity, SensorEntity):
+    """Seconds since the last input on the relay's computer, for debugging At computer."""
+
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # It changes on every poll; enabled by default it would fill the history with noise.
+    _attr_entity_registry_enabled_default = False
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the idle time."""
+        return self.idle_seconds

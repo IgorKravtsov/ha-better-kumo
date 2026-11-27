@@ -7,9 +7,10 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.const import STATE_UNAVAILABLE
+from homeassistant.const import STATE_UNAVAILABLE, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
@@ -18,10 +19,14 @@ from pytest_homeassistant_custom_component.components.diagnostics import (
 )
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
-from custom_components.better_kumo.api import RelayError, is_desktop_state
-from custom_components.better_kumo.const import CONF_POLL_INTERVAL, CONF_WEBHOOK_SECRET
+from custom_components.better_kumo.api import RelayError, idle_seconds, is_desktop_state
+from custom_components.better_kumo.const import (
+    CONF_AWAY_AFTER,
+    CONF_POLL_INTERVAL,
+    CONF_WEBHOOK_SECRET,
+)
 
-from .conftest import RELAY, SECRET, WEBHOOK_SECRET, desktop_state, setup_entry
+from .conftest import RELAY, SECRET, WEBHOOK_SECRET, desktop_state, relay_status, setup_entry
 
 ENTITIES = {
     "sensor.kumospace_status": "available",
@@ -33,6 +38,8 @@ ENTITIES = {
     "switch.kumospace_microphone": "on",
     "switch.kumospace_camera": "off",
 }
+AT_COMPUTER = "binary_sensor.kumospace_at_computer"
+IDLE_TIME = "sensor.kumospace_idle_time"
 
 
 async def test_entities(
@@ -52,12 +59,16 @@ async def test_relay_without_new_fields(
     for key in ("earshot", "inCall", "call"):
         del old[key]
     aioclient_mock.get(f"{RELAY}/v1/desktop", json=old)
+    status = relay_status()
+    del status["idle_seconds"]
+    aioclient_mock.get(f"{RELAY}/v1/status", json=status)
     aioclient_mock.put(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=404)
     aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=404)
     await setup_entry(hass, config_entry)
     assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "unknown"
     assert hass.states.get("sensor.kumospace_people_in_earshot").state == "unknown"
     assert hass.states.get("sensor.kumospace_status").state == "available"
+    assert hass.states.get(AT_COMPUTER).state == "unknown"
 
 
 @pytest.mark.parametrize(
@@ -69,33 +80,116 @@ async def test_relay_without_new_fields(
         {"json": desktop_state(people=[None])},
     ],
 )
-async def test_unavailable_then_recovers(
+async def test_desktop_unavailable_then_recovers(
     hass: HomeAssistant,
     aioclient_mock: AiohttpClientMocker,
     config_entry: MockConfigEntry,
     mock: dict,
 ) -> None:
     aioclient_mock.get(f"{RELAY}/v1/desktop", **mock)
+    aioclient_mock.get(f"{RELAY}/v1/status", json=relay_status())
     aioclient_mock.put(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
     aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
     await setup_entry(hass, config_entry)
     assert config_entry.state is ConfigEntryState.LOADED
     for entity_id in ENTITIES:
         assert hass.states.get(entity_id).state == STATE_UNAVAILABLE, entity_id
+    assert hass.states.get(AT_COMPUTER).state == "on"
 
     aioclient_mock.clear_requests()
     aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
+    aioclient_mock.get(f"{RELAY}/v1/status", json=relay_status())
     aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert hass.states.get("sensor.kumospace_status").state == "available"
 
     aioclient_mock.clear_requests()
     aioclient_mock.get(f"{RELAY}/v1/desktop", status=503)
+    aioclient_mock.get(f"{RELAY}/v1/status", json=relay_status())
     aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=62))
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert hass.states.get("sensor.kumospace_status").state == STATE_UNAVAILABLE
+    assert hass.states.get(AT_COMPUTER).state == "on"
+
+
+async def test_unreachable_relay_makes_everything_unavailable(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    aioclient_mock.get(f"{RELAY}/v1/desktop", exc=TimeoutError())
+    aioclient_mock.get(f"{RELAY}/v1/status", exc=TimeoutError())
+    aioclient_mock.put(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", exc=TimeoutError())
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", exc=TimeoutError())
+    await setup_entry(hass, config_entry)
+    assert config_entry.state is ConfigEntryState.LOADED
+    for entity_id in [*ENTITIES, AT_COMPUTER]:
+        assert hass.states.get(entity_id).state == STATE_UNAVAILABLE, entity_id
+    assert config_entry.runtime_data.last_update_success is False
+    assert config_entry.runtime_data.status.last_update_success is False
+
+
+async def test_at_computer_follows_idle_time_and_option(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(config_entry, options={CONF_AWAY_AFTER: 60})
+
+    def answer(**status) -> None:
+        aioclient_mock.clear_requests()
+        aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
+        aioclient_mock.get(f"{RELAY}/v1/status", json=relay_status(**status))
+        aioclient_mock.put(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+        aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+
+    answer(idle_seconds=59)
+    await setup_entry(hass, config_entry)
+    assert hass.states.get(AT_COMPUTER).state == "on"
+    assert hass.states.get(AT_COMPUTER).attributes["device_class"] == "occupancy"
+    for status, state in (
+        ({"idle_seconds": 60}, "off"),
+        ({"idle_seconds": 0}, "on"),
+        ({"idle_seconds": None}, "unknown"),
+        ({"idle_seconds": -1}, "unknown"),
+        ({"idle_seconds": True}, "unknown"),
+        ({"idle_seconds": "5"}, "unknown"),
+    ):
+        answer(**status)
+        await config_entry.runtime_data.status.async_refresh()
+        await hass.async_block_till_done()
+        assert hass.states.get(AT_COMPUTER).state == state, status
+
+
+async def test_idle_time_sensor_is_disabled_diagnostic(
+    hass: HomeAssistant,
+    relay: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    await setup_entry(hass, config_entry)
+    entry = entity_registry.async_get(IDLE_TIME)
+    assert entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+    assert entry.entity_category is EntityCategory.DIAGNOSTIC
+    assert hass.states.get(IDLE_TIME) is None
+
+    entity_registry.async_update_entity(IDLE_TIME, disabled_by=None)
+    await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+    state = hass.states.get(IDLE_TIME)
+    assert state.state == "12"
+    assert state.attributes["unit_of_measurement"] == "s"
+
+
+async def test_status_failure_alone_keeps_kumospace_entities(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
+    aioclient_mock.get(f"{RELAY}/v1/status", status=500)
+    aioclient_mock.put(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    await setup_entry(hass, config_entry)
+    assert hass.states.get("sensor.kumospace_status").state == "available"
+    assert hass.states.get(AT_COMPUTER).state == STATE_UNAVAILABLE
 
 
 async def test_poll_interval_option(
@@ -106,7 +200,7 @@ async def test_poll_interval_option(
     await setup_entry(hass, config_entry)
     polls = sum(1 for c in relay.mock_calls if str(c[1]).endswith("/v1/desktop"))
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=3))
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert sum(1 for c in relay.mock_calls if str(c[1]).endswith("/v1/desktop")) == polls + 1
 
 
@@ -203,6 +297,9 @@ async def test_diagnostics_redacts_secrets(
     assert WEBHOOK_SECRET not in text
     assert diag["webhook"]["urls"] == ["http://homeassistant.local:8123/api/webhook/hook-1"]
     assert diag["desktop"]["self"]["zoneId"] == "z1"
+    assert diag["status_ok"] is True
+    assert diag["status_error"] is None
+    assert diag["idle_seconds"] == 12
     assert "Alice" not in text
     assert "hi" not in str(diag["desktop"]["self"])
 
@@ -441,3 +538,152 @@ async def test_repair_during_setup_keeps_the_old_key_for_the_old_relay(
     puts = [c for c in relay.mock_calls if c[0] == "PUT"]
     assert puts
     assert puts[0][2]["secret"] == WEBHOOK_SECRET
+
+
+async def test_stalled_status_does_not_delay_desktop(
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    await setup_entry(hass, config_entry)
+    coordinator = config_entry.runtime_data
+    gate = asyncio.Event()
+
+    async def stalled():
+        await gate.wait()
+        return relay_status()
+
+    relay.clear_requests()
+    relay.get(f"{RELAY}/v1/desktop", json=desktop_state(inCall=True))
+    relay.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    with patch.object(coordinator.client, "status", side_effect=stalled):
+        status_read = hass.async_create_task(coordinator.status.async_refresh())
+        await coordinator.async_refresh()
+        assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
+        gate.set()
+        await status_read
+
+
+async def test_command_reply_does_not_revive_failed_status(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
+    aioclient_mock.get(f"{RELAY}/v1/status", json=relay_status())
+    aioclient_mock.put(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    await setup_entry(hass, config_entry)
+    assert hass.states.get(AT_COMPUTER).state == "on"
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{RELAY}/v1/desktop", exc=TimeoutError())
+    aioclient_mock.get(f"{RELAY}/v1/status", exc=TimeoutError())
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    coordinator = config_entry.runtime_data
+    await coordinator.async_refresh()
+    await coordinator.status.async_refresh()
+    assert hass.states.get(AT_COMPUTER).state == STATE_UNAVAILABLE
+
+    coordinator.async_apply(desktop_state(inCall=True))
+    await hass.async_block_till_done()
+    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
+    assert hass.states.get(AT_COMPUTER).state == STATE_UNAVAILABLE
+
+
+async def test_diagnostics_after_failed_reads(
+    hass: HomeAssistant,
+    hass_client,
+    aioclient_mock: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+) -> None:
+    aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
+    aioclient_mock.get(f"{RELAY}/v1/status", json=relay_status())
+    aioclient_mock.put(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    await setup_entry(hass, config_entry)
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
+    aioclient_mock.get(f"{RELAY}/v1/status", status=401)
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    await config_entry.runtime_data.status.async_refresh()
+    diag = await get_diagnostics_for_config_entry(hass, hass_client, config_entry)
+    assert diag["last_update_success"] is True
+    assert diag["desktop"] is not None
+    assert diag["status_ok"] is False
+    assert diag["status_error"] == "wrong relay secret"
+    assert diag["idle_seconds"] is None
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{RELAY}/v1/desktop", exc=TimeoutError())
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    await config_entry.runtime_data.async_refresh()
+    diag = await get_diagnostics_for_config_entry(hass, hass_client, config_entry)
+    assert diag["last_update_success"] is False
+    assert diag["desktop"] is None
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
+    aioclient_mock.get(f"{RELAY}/v1/status", json=relay_status())
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    await config_entry.runtime_data.async_refresh()
+    await config_entry.runtime_data.status.async_refresh()
+    diag = await get_diagnostics_for_config_entry(hass, hass_client, config_entry)
+    assert diag["last_error"] is None
+    assert diag["status_error"] is None
+    assert diag["idle_seconds"] == 12
+
+
+async def test_stalled_status_does_not_delay_setup(
+    hass: HomeAssistant,
+    hass_client,
+    relay: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+) -> None:
+    gate = asyncio.Event()
+
+    async def stalled(_self):
+        await gate.wait()
+        return relay_status()
+
+    config_entry.add_to_hass(hass)
+    with patch("custom_components.better_kumo.api.RelayClient.status", stalled):
+        assert await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+        assert hass.states.get("sensor.kumospace_status").state == "available"
+        assert any(c[0] == "PUT" for c in relay.mock_calls)
+        assert hass.states.get(AT_COMPUTER).state == "unknown"
+        diag = await get_diagnostics_for_config_entry(hass, hass_client, config_entry)
+        assert diag["status_ok"] is None
+        gate.set()
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(AT_COMPUTER).state == "on"
+    diag = await get_diagnostics_for_config_entry(hass, hass_client, config_entry)
+    assert diag["status_ok"] is True
+
+
+async def test_overlapping_status_reads_are_serialized(
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    # HA 2025.8 does not serialize async_refresh, so the coordinator's own read must.
+    await setup_entry(hass, config_entry)
+    status = config_entry.runtime_data.status
+    gate = asyncio.Event()
+    started = []
+
+    async def read():
+        started.append(len(started))
+        await gate.wait()
+        return relay_status()
+
+    with patch.object(status.client, "status", side_effect=read):
+        first = hass.async_create_task(status._async_update_data())
+        second = hass.async_create_task(status._async_update_data())
+        await asyncio.sleep(0.01)
+        assert started == [0]
+        gate.set()
+        await asyncio.gather(first, second)
+    assert started == [0, 1]
+
+
+def test_idle_seconds_rejects_values_too_long_for_a_state() -> None:
+    assert idle_seconds({"idle_seconds": 2**64 - 1}) == 2**64 - 1
+    assert idle_seconds({"idle_seconds": 2**64}) is None
+    assert idle_seconds({"idle_seconds": int("9" * 300)}) is None

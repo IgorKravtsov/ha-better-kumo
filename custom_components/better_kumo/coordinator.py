@@ -11,7 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import RelayClient, RelayError
+from .api import RelayClient, RelayError, idle_seconds
 from .const import CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL, DOMAIN
 
 if TYPE_CHECKING:
@@ -46,6 +46,7 @@ class BetterKumoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._read_lock = asyncio.Lock()
         self.command_lock = asyncio.Lock()
         self.receiver: WebhookReceiver | None = None
+        self.status = StatusCoordinator(hass, entry, client, self.update_interval)
 
     async def _async_update_data(self) -> dict[str, Any]:
         # HA 2025.8 does not serialize scheduled polls with async_refresh.
@@ -88,3 +89,37 @@ class BetterKumoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # After shutdown async_refresh returns without reading or yielding.
         while self._stale and not self._shutdown_requested:
             await self.async_refresh()
+
+
+class StatusCoordinator(DataUpdateCoordinator[int | None]):
+    """Polls GET /v1/status on its own, so neither endpoint waits for the other.
+
+    Data is the relay computer's idle seconds, None when the relay can't tell.
+    """
+
+    config_entry: BetterKumoConfigEntry
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: BetterKumoConfigEntry,
+        client: RelayClient,
+        interval: timedelta | None,
+    ) -> None:
+        super().__init__(
+            hass, _LOGGER, config_entry=entry, name=f"{DOMAIN} status", update_interval=interval
+        )
+        self.client = client
+        self._read_lock = asyncio.Lock()
+        # HA starts with last_update_success True, and the first read runs after setup.
+        self.has_read = False
+
+    async def _async_update_data(self) -> int | None:
+        # HA 2025.8 does not serialize polls with async_refresh; an older sample must not land last.
+        async with self._read_lock:
+            try:
+                return idle_seconds(await self.client.status())
+            except RelayError as err:
+                raise UpdateFailed(str(err)) from err
+            finally:
+                self.has_read = True
