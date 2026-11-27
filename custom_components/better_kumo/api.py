@@ -84,8 +84,7 @@ def idle_seconds(status: dict[str, Any]) -> int | None:
     return None
 
 
-# Error texts are fixed: a relay or proxy error body may hold anything, so it never reaches
-# messages, logs or diagnostics. Statuses the relay uses, per docs/relay-api.md:
+# Remote error bodies may contain secrets, so messages use fixed text per status.
 DESKTOP_ERRORS = {
     503: "Kumospace desktop is not connected to the relay, or not in a space",
     404: "the relay runs with the desktop bridge disabled",
@@ -140,13 +139,16 @@ class RelayClient:
                 if resp.status == 401:
                     raise RelayAuthError(f"{action} failed: wrong relay secret (HTTP 401)")
                 if resp.status >= 300:
-                    # The body is never read, so it cannot leak into the message.
                     raise RelayError(http_error(action, resp.status, errors))
                 text = await resp.text()
         except TimeoutError:
             raise RelayError(f"{action} failed: relay not reachable: timed out") from None
+        except (aiohttp.ClientSSLError, aiohttp.ClientConnectorCertificateError) as err:
+            # TLS errors can quote the peer certificate.
+            raise RelayError(
+                f"{action} failed: relay not reachable: TLS error ({type(err).__name__})"
+            ) from None
         except aiohttp.ClientConnectorError as err:
-            # Connecting failed before any reply: the text names the host and the OS error.
             raise RelayError(f"{action} failed: relay not reachable: {err}") from err
         except aiohttp.ClientError as err:
             # Other aiohttp errors can quote a malformed reply's status line or headers.

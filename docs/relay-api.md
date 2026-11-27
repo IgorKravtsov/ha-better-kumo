@@ -101,8 +101,8 @@ text, for example `Turning the microphone on failed: Kumospace desktop is not in
 | other | the relay answered with an error | same | same |
 
 Replies that are not UTF-8, not JSON or not the expected shape get a fixed `unexpected reply from the relay`
-message. Connection failures keep aiohttp's text (host and OS error); other aiohttp errors, which can quote a
-malformed reply, show only the error type.
+message. Connection failures keep aiohttp's text (host and OS error); TLS errors, which can quote the peer
+certificate, and other aiohttp errors, which can quote a malformed reply, show only the error type.
 
 ## Webhooks (new)
 

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import traceback
+from unittest.mock import Mock
+
 import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -143,6 +146,23 @@ async def test_wrong_secret(hass: HomeAssistant, aioclient_mock: AiohttpClientMo
             "relay not reachable (ServerDisconnectedError)",
         ),
         ({"exc": TimeoutError()}, "relay not reachable: timed out"),
+        ({"exc": aiohttp.ServerTimeoutError(LEAK)}, "relay not reachable: timed out"),
+        (
+            {
+                "exc": aiohttp.ClientConnectorCertificateError(
+                    Mock(host="relay", port=8787, ssl=True), ValueError(f"CN={LEAK}")
+                )
+            },
+            "relay not reachable: TLS error (ClientConnectorCertificateError)",
+        ),
+        (
+            {
+                "exc": aiohttp.ClientConnectorSSLError(
+                    Mock(host="relay", port=8787, ssl=True), OSError(1, f"CN={LEAK}")
+                )
+            },
+            "relay not reachable: TLS error (ClientConnectorSSLError)",
+        ),
     ],
 )
 async def test_bad_reply_hides_the_body(
@@ -152,7 +172,19 @@ async def test_bad_reply_hides_the_body(
     with pytest.raises(RelayError) as err:
         await client(hass).status()
     assert str(err.value) == f"Reading the relay status failed: {reason}"
-    assert err.value.__cause__ is None
+    assert LEAK not in "".join(traceback.format_exception(err.value))
+
+
+async def test_connection_error_keeps_aiohttp_text(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    refused = aiohttp.ClientConnectorError(
+        Mock(host="relay", port=8787, ssl=True), ConnectionRefusedError(61, "Connection refused")
+    )
+    aioclient_mock.get(f"{RELAY}/v1/status", exc=refused)
+    with pytest.raises(RelayError) as err:
+        await client(hass).status()
+    assert str(err.value) == f"Reading the relay status failed: relay not reachable: {refused}"
 
 
 async def test_503_body_stays_out_of_diagnostics_and_toasts(
