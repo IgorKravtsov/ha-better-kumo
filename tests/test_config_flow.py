@@ -14,6 +14,7 @@ import voluptuous as vol
 from custom_components.better_kumo.api import parse_pairing_link
 from custom_components.better_kumo.const import (
     CONF_AWAY_AFTER,
+    CONF_PHONE_IN_USE_FOR,
     CONF_POLL_INTERVAL,
     CONF_SECRET,
     CONF_WEBHOOK_SECRET,
@@ -159,10 +160,19 @@ async def test_options(
             await hass.config_entries.options.async_configure(
                 result["flow_id"], {CONF_POLL_INTERVAL: 5, CONF_AWAY_AFTER: bad}
             )
+    for bad in (29, 3601):
+        with pytest.raises(vol.Invalid):
+            await hass.config_entries.options.async_configure(
+                result["flow_id"], {CONF_POLL_INTERVAL: 5, CONF_PHONE_IN_USE_FOR: bad}
+            )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {CONF_POLL_INTERVAL: 5, CONF_AWAY_AFTER: 60.5}
     )
     assert result["errors"] == {CONF_AWAY_AFTER: "invalid_away_after"}
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_POLL_INTERVAL: 5, CONF_PHONE_IN_USE_FOR: 90.5}
+    )
+    assert result["errors"] == {CONF_PHONE_IN_USE_FOR: "invalid_phone_in_use_for"}
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {CONF_POLL_INTERVAL: 5, CONF_WEBHOOK_URL: "ha.example.com"}
     )
@@ -177,13 +187,19 @@ async def test_options(
     assert result["errors"] == {CONF_POLL_INTERVAL: "invalid_interval"}
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {CONF_POLL_INTERVAL: 5, CONF_AWAY_AFTER: 600, CONF_WEBHOOK_URL: "https://ha.example.com/"},
+        {
+            CONF_POLL_INTERVAL: 5,
+            CONF_AWAY_AFTER: 600,
+            CONF_PHONE_IN_USE_FOR: 120,
+            CONF_WEBHOOK_URL: "https://ha.example.com/",
+        },
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
     assert config_entry.options == {
         CONF_POLL_INTERVAL: 5,
         CONF_AWAY_AFTER: 600,
+        CONF_PHONE_IN_USE_FOR: 120,
         CONF_WEBHOOK_URL: "https://ha.example.com",
     }
     assert config_entry.runtime_data.update_interval.total_seconds() == 5

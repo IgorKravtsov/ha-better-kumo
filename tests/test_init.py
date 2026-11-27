@@ -19,9 +19,16 @@ from pytest_homeassistant_custom_component.components.diagnostics import (
 )
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
-from custom_components.better_kumo.api import RelayError, idle_seconds, is_desktop_state
+from custom_components.better_kumo.api import (
+    RelayError,
+    RelayStatus,
+    idle_seconds,
+    is_desktop_state,
+    relay_status as parse_status,
+)
 from custom_components.better_kumo.const import (
     CONF_AWAY_AFTER,
+    CONF_PHONE_IN_USE_FOR,
     CONF_POLL_INTERVAL,
     CONF_WEBHOOK_SECRET,
 )
@@ -40,6 +47,8 @@ ENTITIES = {
 }
 AT_COMPUTER = "binary_sensor.kumospace_at_computer"
 IDLE_TIME = "sensor.kumospace_idle_time"
+USING_PHONE = "binary_sensor.kumospace_using_phone"
+PHONE_IDLE_TIME = "sensor.kumospace_phone_idle_time"
 
 
 async def test_entities(
@@ -61,6 +70,7 @@ async def test_relay_without_new_fields(
     aioclient_mock.get(f"{RELAY}/v1/desktop", json=old)
     status = relay_status()
     del status["idle_seconds"]
+    del status["phone_idle_seconds"]
     aioclient_mock.get(f"{RELAY}/v1/status", json=status)
     aioclient_mock.put(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=404)
     aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=404)
@@ -69,6 +79,7 @@ async def test_relay_without_new_fields(
     assert hass.states.get("sensor.kumospace_people_in_earshot").state == "unknown"
     assert hass.states.get("sensor.kumospace_status").state == "available"
     assert hass.states.get(AT_COMPUTER).state == "unknown"
+    assert hass.states.get(USING_PHONE).state == "unknown"
 
 
 @pytest.mark.parametrize(
@@ -95,6 +106,7 @@ async def test_desktop_unavailable_then_recovers(
     for entity_id in ENTITIES:
         assert hass.states.get(entity_id).state == STATE_UNAVAILABLE, entity_id
     assert hass.states.get(AT_COMPUTER).state == "on"
+    assert hass.states.get(USING_PHONE).state == "on"
 
     aioclient_mock.clear_requests()
     aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
@@ -123,7 +135,7 @@ async def test_unreachable_relay_makes_everything_unavailable(
     aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", exc=TimeoutError())
     await setup_entry(hass, config_entry)
     assert config_entry.state is ConfigEntryState.LOADED
-    for entity_id in [*ENTITIES, AT_COMPUTER]:
+    for entity_id in [*ENTITIES, AT_COMPUTER, USING_PHONE]:
         assert hass.states.get(entity_id).state == STATE_UNAVAILABLE, entity_id
     assert config_entry.runtime_data.last_update_success is False
     assert config_entry.runtime_data.status.last_update_success is False
@@ -160,6 +172,90 @@ async def test_at_computer_follows_idle_time_and_option(
         assert hass.states.get(AT_COMPUTER).state == state, status
 
 
+async def test_using_phone_follows_phone_idle_time_and_option(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(config_entry, options={CONF_PHONE_IN_USE_FOR: 60})
+
+    def answer(status: dict) -> None:
+        aioclient_mock.clear_requests()
+        aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
+        aioclient_mock.get(f"{RELAY}/v1/status", json=status)
+        aioclient_mock.put(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+        aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+
+    answer(relay_status(phone_idle_seconds=59))
+    await setup_entry(hass, config_entry)
+    assert hass.states.get(USING_PHONE).state == "on"
+    assert hass.states.get(USING_PHONE).attributes["device_class"] == "occupancy"
+    absent = relay_status()
+    del absent["phone_idle_seconds"]
+    for status, state in (
+        (relay_status(phone_idle_seconds=60), "off"),
+        (relay_status(phone_idle_seconds=0), "on"),
+        # No phone has reported since the relay started: not using the phone.
+        (relay_status(phone_idle_seconds=None), "off"),
+        # A relay older than better-kumo-app#70 can't tell.
+        (absent, "unknown"),
+        (relay_status(phone_idle_seconds=-1), "unknown"),
+        (relay_status(phone_idle_seconds=True), "unknown"),
+        (relay_status(phone_idle_seconds="5"), "unknown"),
+        # Independent of the computer's idle time.
+        (relay_status(idle_seconds=None, phone_idle_seconds=1), "on"),
+    ):
+        answer(status)
+        await config_entry.runtime_data.status.async_refresh()
+        await hass.async_block_till_done()
+        assert hass.states.get(USING_PHONE).state == state, status
+
+
+async def test_using_phone_default_threshold(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
+    aioclient_mock.get(f"{RELAY}/v1/status", json=relay_status(phone_idle_seconds=89))
+    aioclient_mock.put(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    await setup_entry(hass, config_entry)
+    assert hass.states.get(USING_PHONE).state == "on"
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{RELAY}/v1/status", json=relay_status(phone_idle_seconds=90))
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    await config_entry.runtime_data.status.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(USING_PHONE).state == "off"
+
+
+async def test_phone_idle_time_sensor_is_disabled_diagnostic(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    relay: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    await setup_entry(hass, config_entry)
+    entry = entity_registry.async_get(PHONE_IDLE_TIME)
+    assert entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+    assert entry.entity_category is EntityCategory.DIAGNOSTIC
+    assert hass.states.get(PHONE_IDLE_TIME) is None
+
+    entity_registry.async_update_entity(PHONE_IDLE_TIME, disabled_by=None)
+    await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+    state = hass.states.get(PHONE_IDLE_TIME)
+    assert state.state == "20"
+    assert state.attributes["unit_of_measurement"] == "s"
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{RELAY}/v1/status", json=relay_status(phone_idle_seconds=None))
+    aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=204)
+    await config_entry.runtime_data.status.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(PHONE_IDLE_TIME).state == "unknown"
+
+
 async def test_idle_time_sensor_is_disabled_diagnostic(
     hass: HomeAssistant,
     relay: AiohttpClientMocker,
@@ -190,6 +286,7 @@ async def test_status_failure_alone_keeps_kumospace_entities(
     await setup_entry(hass, config_entry)
     assert hass.states.get("sensor.kumospace_status").state == "available"
     assert hass.states.get(AT_COMPUTER).state == STATE_UNAVAILABLE
+    assert hass.states.get(USING_PHONE).state == STATE_UNAVAILABLE
 
 
 async def test_poll_interval_option(
@@ -610,6 +707,8 @@ async def test_diagnostics_after_failed_reads(
     assert diag["status_ok"] is False
     assert diag["status_error"] == "Reading the relay status failed: wrong relay secret (HTTP 401)"
     assert diag["idle_seconds"] is None
+    assert diag["phone_idle_known"] is None
+    assert diag["phone_idle_seconds"] is None
 
     aioclient_mock.clear_requests()
     aioclient_mock.get(f"{RELAY}/v1/desktop", exc=TimeoutError())
@@ -629,6 +728,8 @@ async def test_diagnostics_after_failed_reads(
     assert diag["last_error"] is None
     assert diag["status_error"] is None
     assert diag["idle_seconds"] == 12
+    assert diag["phone_idle_known"] is True
+    assert diag["phone_idle_seconds"] == 20
 
 
 async def test_stalled_status_does_not_delay_setup(
@@ -687,3 +788,13 @@ def test_idle_seconds_rejects_values_too_long_for_a_state() -> None:
     assert idle_seconds({"idle_seconds": 2**64 - 1}) == 2**64 - 1
     assert idle_seconds({"idle_seconds": 2**64}) is None
     assert idle_seconds({"idle_seconds": int("9" * 300)}) is None
+
+
+def test_relay_status_tells_no_phone_report_from_an_older_relay() -> None:
+    assert parse_status({"phone_idle_seconds": None}) == RelayStatus(phone_known=True)
+    assert parse_status({}) == RelayStatus(phone_known=False)
+    assert parse_status({"phone_idle_seconds": 2**64 - 1}) == RelayStatus(
+        phone_known=True, phone_idle_seconds=2**64 - 1
+    )
+    assert parse_status({"phone_idle_seconds": 2**64}) == RelayStatus(phone_known=False)
+    assert parse_status({"phone_idle_seconds": 1.5}) == RelayStatus(phone_known=False)

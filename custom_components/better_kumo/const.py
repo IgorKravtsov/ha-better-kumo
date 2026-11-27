@@ -9,6 +9,7 @@ CONF_LINK = "link"
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_WEBHOOK_URL = "webhook_url"
 CONF_AWAY_AFTER = "away_after"
+CONF_PHONE_IN_USE_FOR = "phone_in_use_for"
 
 DEFAULT_POLL_INTERVAL = 30
 MIN_POLL_INTERVAL = 1
@@ -17,6 +18,11 @@ MAX_POLL_INTERVAL = 3600
 DEFAULT_AWAY_AFTER = 300
 MIN_AWAY_AFTER = 30
 MAX_AWAY_AFTER = 3600
+
+# The phone app reports every 30 s while open, so the value can lag up to about 30 s.
+DEFAULT_PHONE_IN_USE_FOR = 90
+MIN_PHONE_IN_USE_FOR = 30
+MAX_PHONE_IN_USE_FOR = 3600
 
 REGISTER_INTERVAL = timedelta(minutes=10)
 

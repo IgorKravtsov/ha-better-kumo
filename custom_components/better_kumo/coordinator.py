@@ -11,7 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import RelayClient, RelayError, idle_seconds
+from .api import RelayClient, RelayError, RelayStatus, relay_status
 from .const import CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL, DOMAIN
 
 if TYPE_CHECKING:
@@ -91,11 +91,8 @@ class BetterKumoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.async_refresh()
 
 
-class StatusCoordinator(DataUpdateCoordinator[int | None]):
-    """Polls GET /v1/status on its own, so neither endpoint waits for the other.
-
-    Data is the relay computer's idle seconds, None when the relay can't tell.
-    """
+class StatusCoordinator(DataUpdateCoordinator[RelayStatus]):
+    """Polls GET /v1/status on its own, so neither endpoint waits for the other."""
 
     config_entry: BetterKumoConfigEntry
 
@@ -114,11 +111,11 @@ class StatusCoordinator(DataUpdateCoordinator[int | None]):
         # HA starts with last_update_success True, and the first read runs after setup.
         self.has_read = False
 
-    async def _async_update_data(self) -> int | None:
+    async def _async_update_data(self) -> RelayStatus:
         # HA 2025.8 does not serialize polls with async_refresh; an older sample must not land last.
         async with self._read_lock:
             try:
-                return idle_seconds(await self.client.status())
+                return relay_status(await self.client.status())
             except RelayError as err:
                 raise UpdateFailed(str(err)) from err
             finally:

@@ -19,6 +19,8 @@ One device, **Kumospace**, per relay:
 | `sensor` People in earshot | how many people you hear; attribute `names` lists them |
 | `binary_sensor` At computer | on while someone used the keyboard, mouse or trackpad of the relay's computer recently ([details](#at-computer)) |
 | `sensor` Idle time | diagnostic, disabled by default: seconds since that input |
+| `binary_sensor` Using phone | on while the Better Kumo phone app was on screen recently, or a call is handed off to the phone ([details](#using-phone)) |
+| `sensor` Phone idle time | diagnostic, disabled by default: seconds since the phone app was last on screen |
 | `event` Messages | a chat message from someone else, in any channel (direct, group, public, threads) |
 | `event` Office events | nudges, knocks, people entering or leaving rooms, joining a floor, going online or offline, changing status, nearby chat |
 
@@ -97,10 +99,62 @@ being at home.
 The **Idle time** sensor shows the raw value. It is disabled by default because it changes on every poll and would
 fill the history; enable it under the device's diagnostic entities to tune **Away after idle**.
 
+## Using phone
+
+**Using phone** (`binary_sensor.kumospace_using_phone`, device class `occupancy` like **At computer**: on is
+"Detected") is on while the Better Kumo phone app was in the foreground less than **Phone counts as in use for**
+seconds ago (option, default 90), and while a Kumospace call is handed off to the phone. It comes from
+`phone_idle_seconds` in the same `GET /v1/status` read as **At computer**, so it follows the poll interval too. The
+phone app reports when it opens and then every 30 s while it is on screen, on any screen, and stops when it leaves
+the foreground; the value can therefore be up to about 30 s behind the moment you put the phone away. The default
+of 90 s covers that and a late poll. The phone reports through the relay, so it counts only while the phone can
+reach the relay.
+
+- **Off** when no phone has reported since the relay started (the relay sends `null`), including with a phone app
+  too old to report: no report means you are not using the phone.
+- **Unknown** with a relay that does not send `phone_idle_seconds` at all (older than
+  [better-kumo-app#70](https://github.com/IgorKravtsov/better-kumo-app/pull/70)).
+- **Unavailable** while the relay does not answer, the same as **At computer**. Treat `unavailable` (and `unknown`)
+  as **not using the phone**.
+
+The **Phone idle time** sensor shows the raw value (unknown until a phone reports). It is disabled by default for
+the same reason as **Idle time**.
+
+### Announce only when you are away from both
+
+To act only when you are neither at the computer nor on the phone, require that neither sensor is `on`, so
+`unavailable` and `unknown` count as away. For example, announce Kumospace office events on a speaker:
+
+```yaml
+triggers:
+  - trigger: state
+    entity_id: event.kumospace_office_events
+    not_from: [unavailable]
+    not_to: [unavailable, unknown]
+conditions:
+  - condition: not
+    conditions:
+      - condition: state
+        entity_id: binary_sensor.kumospace_at_computer
+        state: "on"
+      - condition: state
+        entity_id: binary_sensor.kumospace_using_phone
+        state: "on"
+actions:
+  - action: tts.speak
+    target:
+      entity_id: tts.home_assistant_cloud
+    data:
+      media_player_entity_id: media_player.living_room
+      message: "{{ trigger.to_state.attributes.person }}: {{ trigger.to_state.attributes.event_type }}"
+```
+
+A `not` condition passes only when none of its conditions pass, so this runs only when neither sensor is `on`.
+
 ## Availability
 
 When the relay is unreachable every entity is unavailable. When Kumospace desktop is not connected to it, every
-entity except **At computer** and **Idle time** is unavailable.
+entity except **At computer**, **Using phone** and the two idle time sensors is unavailable.
 `In a call` and the earshot entities stay `unknown` with a relay older than these fields. Webhooks, earshot, the
 call fields and keeping the status message need a relay with
 [better-kumo-app#61](https://github.com/IgorKravtsov/better-kumo-app/pull/61).
@@ -130,11 +184,13 @@ home. Pairing again with a new address or secret updates the existing entry.
 - **Poll interval**: seconds between reads of the relay state, 1–3600, default 30.
 - **Away after idle**: seconds without input on the relay's computer after which **At computer** turns off,
   30–3600, default 300.
+- **Phone counts as in use for**: seconds after the phone app was last on screen after which **Using phone** turns
+  off, 30–3600, default 90. The app reports every 30 s, so a value close to 30 can flicker off between reports.
 - **Home Assistant URL for webhooks**: optional, for example `https://ha.example.com`. The relay tries it first.
 
 ## Push and polling
 
-Home Assistant polls `GET /v1/desktop` and, separately, `GET /v1/status` (for the idle time) at the poll interval,
+Home Assistant polls `GET /v1/desktop` and, separately, `GET /v1/status` (for the idle times) at the poll interval,
 always; neither waits for the other. On top of that it registers a webhook in the
 relay, so changes show up within a fraction of a second:
 

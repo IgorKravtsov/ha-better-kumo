@@ -28,21 +28,28 @@ the request body, which can carry the webhook secret), so a 3xx answer counts as
 ### `GET /v1/status` (existing, extended)
 
 The relay's own status (snake_case JSON). The config flow reads `uid` from it as the entry's unique id. Polling
-reads it on its own, independently of `GET /v1/desktop`, for one field:
+reads it on its own, independently of `GET /v1/desktop`, for two fields:
 
 | Field | Type | Meaning |
 |---|---|---|
 | `idle_seconds` | `integer \| null`, optional | whole seconds since the last local keyboard, mouse or trackpad input on the relay's computer, read on every request. `null` when the relay can't tell (Linux; Windows in session 0); absent from relays older than [better-kumo-app#66](https://github.com/IgorKravtsov/better-kumo-app/pull/66). Never `0` for unknown. |
+| `phone_idle_seconds` | `integer \| null`, optional | whole seconds since a paired Better Kumo phone app was last in the foreground (it reports on opening and every 30 s while open), computed on every request. `0` while a Kumospace call is handed off to the phone. `null` until a phone has reported since the relay started (always, with phone apps that don't report); absent from relays older than [better-kumo-app#70](https://github.com/IgorKravtsov/better-kumo-app/pull/70). |
 
 ```json
 { "uid": "…", "enabled": true, "online": true, "ntfy": false, "apns": false, "devices": 1, "desktop": true,
-  "api": 3, "version": "…", "agents": true, "idle_seconds": 42 }
+  "api": 3, "version": "…", "agents": true, "idle_seconds": 42, "phone_idle_seconds": 7 }
 ```
 
-`GET /v1/status` answers whether or not Kumospace desktop is connected, so the **At computer** entity depends only
-on it: unavailable when it fails, unknown when `idle_seconds` is `null`, absent or not an integer from 0 to 2^64 − 1, else
-on when `idle_seconds` is below the **Away after idle** option. `idle_seconds` is never in webhook deliveries (it
-changes every second), so it updates only on reads.
+`GET /v1/status` answers whether or not Kumospace desktop is connected, so the **At computer** and **Using phone**
+entities depend only on it, and are unavailable when it fails:
+
+- **At computer** is unknown when `idle_seconds` is `null`, absent or not an integer from 0 to 2^64 − 1, else on when
+  `idle_seconds` is below the **Away after idle** option.
+- **Using phone** is unknown when `phone_idle_seconds` is absent or neither `null` nor an integer from 0 to
+  2^64 − 1, off when it is `null` (no phone report means not using the phone), else on when it is below the
+  **Phone counts as in use for** option.
+
+Neither field is in webhook deliveries (they change every second), so they update only on reads.
 
 ### `GET /v1/desktop` (existing, extended)
 
@@ -56,8 +63,8 @@ Errors are non-2xx answers:
 | 503 | Kumospace desktop is not connected to the relay, or is connected but not in a space |
 | 404 | the relay runs with the desktop bridge disabled |
 
-The integration treats any error the same way: every entity except **At computer** and **Idle time** becomes
-unavailable. Those two follow only `GET /v1/status`; when both reads fail (the relay is unreachable), every entity is
+The integration treats any error the same way: every entity except **At computer**, **Using phone**, **Idle time**
+and **Phone idle time** becomes unavailable. Those four follow only `GET /v1/status`; when both reads fail (the relay is unreachable), every entity is
 unavailable.
 
 **New fields:**
@@ -210,5 +217,5 @@ relay may add kinds without breaking it.
 The integration polls `GET /v1/desktop` and `GET /v1/status` independently on a configurable interval (1–3600 s,
 default 30 s) whether or not webhooks work, and reads `GET /v1/desktop` again after every `desktop` or
 `disconnected` delivery. If `GET /v1/desktop` fails, the Kumospace entities become unavailable; if `GET /v1/status`
-fails, **At computer** and **Idle time** do. Neither read waits for the other, and a command reply touches only the
+fails, **At computer**, **Using phone** and the idle time sensors do. Neither read waits for the other, and a command reply touches only the
 Kumospace entities.

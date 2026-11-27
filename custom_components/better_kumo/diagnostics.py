@@ -23,6 +23,8 @@ async def async_get_config_entry_diagnostics(
     coordinator = entry.runtime_data
     receiver = coordinator.receiver
     status = coordinator.status
+    # HA keeps the last data after a failed read.
+    read = status.data if status.last_update_success else None
     return {
         "entry": {
             "data": async_redact_data(dict(entry.data), TO_REDACT),
@@ -42,5 +44,9 @@ async def async_get_config_entry_diagnostics(
         else None,
         "status_ok": status.last_update_success if status.has_read else None,
         "status_error": None if status.last_update_success else str(status.last_exception),
-        "idle_seconds": status.data if status.last_update_success else None,
+        "idle_seconds": read.idle_seconds if read else None,
+        # False when the relay sent no valid phone_idle_seconds (an older relay); then the
+        # value is None. When True, None means no phone has reported since the relay started.
+        "phone_idle_known": read.phone_known if read else None,
+        "phone_idle_seconds": read.phone_idle_seconds if read else None,
     }
