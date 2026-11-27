@@ -19,7 +19,7 @@ from custom_components.better_kumo.api import RelayError
 from custom_components.better_kumo.const import CONF_WEBHOOK_URL, EVENT_BETTER_KUMO
 from custom_components.better_kumo.webhook import valid_signature
 
-from .conftest import RELAY, WEBHOOK_SECRET, desktop_state, setup_entry
+from .conftest import RELAY, WEBHOOK_SECRET, desktop_state, relay_status, setup_entry
 
 PATH = "/api/webhook/hook-1"
 
@@ -70,9 +70,12 @@ async def test_desktop_signal_reads_the_relay(
     hass: HomeAssistant, post, relay: AiohttpClientMocker
 ) -> None:
     reads = desktop_reads(relay)
+    status_reads = sum(1 for c in relay.mock_calls if str(c[1]).endswith("/v1/status"))
     body = {"boot": "b1", "seq": 1, "kind": "desktop", "desktop": desktop_state(inCall=True)}
     assert await post(body) == 200
     assert desktop_reads(relay) == reads + 1
+    # The same read refreshes the idle time.
+    assert sum(1 for c in relay.mock_calls if str(c[1]).endswith("/v1/status")) == status_reads + 1
     assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
 
 
@@ -220,6 +223,7 @@ async def test_registration_failure_keeps_polling(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
+    aioclient_mock.get(f"{RELAY}/v1/status", json=relay_status())
     aioclient_mock.put(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=404)
     aioclient_mock.delete(f"{RELAY}/v1/webhooks/{config_entry.entry_id}", status=404)
     await setup_entry(hass, config_entry)

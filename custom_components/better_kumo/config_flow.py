@@ -34,14 +34,18 @@ from .api import (
     parse_pairing_link,
 )
 from .const import (
+    CONF_AWAY_AFTER,
     CONF_LINK,
     CONF_POLL_INTERVAL,
     CONF_SECRET,
     CONF_WEBHOOK_SECRET,
     CONF_WEBHOOK_URL,
+    DEFAULT_AWAY_AFTER,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
+    MAX_AWAY_AFTER,
     MAX_POLL_INTERVAL,
+    MIN_AWAY_AFTER,
     MIN_POLL_INTERVAL,
 )
 from .coordinator import BetterKumoConfigEntry
@@ -134,19 +138,23 @@ class BetterKumoConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class BetterKumoOptionsFlow(OptionsFlowWithReload):
-    """Poll interval and webhook URL override."""
+    """Poll interval, webhook URL override and the idle time that means away."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle options."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            interval = user_input[CONF_POLL_INTERVAL]
             options: dict[str, Any] = {}
-            # The selector's step=1 is only a UI hint; the API accepts 1.9 and "NaN".
-            if math.isfinite(interval) and interval == int(interval):
-                options[CONF_POLL_INTERVAL] = int(interval)
-            else:
-                errors[CONF_POLL_INTERVAL] = "invalid_interval"
+            for key, error in (
+                (CONF_POLL_INTERVAL, "invalid_interval"),
+                (CONF_AWAY_AFTER, "invalid_away_after"),
+            ):
+                seconds = user_input[key]
+                # The selector's step=1 is only a UI hint; the API accepts 1.9 and "NaN".
+                if math.isfinite(seconds) and seconds == int(seconds):
+                    options[key] = int(seconds)
+                else:
+                    errors[key] = error
             if override := user_input.get(CONF_WEBHOOK_URL, "").strip():
                 try:
                     options[CONF_WEBHOOK_URL] = normalize_url(override)
@@ -160,6 +168,15 @@ class BetterKumoOptionsFlow(OptionsFlowWithReload):
                     NumberSelectorConfig(
                         min=MIN_POLL_INTERVAL,
                         max=MAX_POLL_INTERVAL,
+                        step=1,
+                        mode=NumberSelectorMode.BOX,
+                        unit_of_measurement="s",
+                    )
+                ),
+                vol.Required(CONF_AWAY_AFTER, default=DEFAULT_AWAY_AFTER): NumberSelector(
+                    NumberSelectorConfig(
+                        min=MIN_AWAY_AFTER,
+                        max=MAX_AWAY_AFTER,
                         step=1,
                         mode=NumberSelectorMode.BOX,
                         unit_of_measurement="s",

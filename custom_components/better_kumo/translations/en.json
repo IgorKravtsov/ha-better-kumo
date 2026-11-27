@@ -32,17 +32,20 @@
       "init": {
         "data": {
           "poll_interval": "Poll interval",
+          "away_after": "Away after idle",
           "webhook_url": "Home Assistant URL for webhooks"
         },
         "data_description": {
           "poll_interval": "How often to read the state from the relay, in seconds (1–3600). Polling runs even when webhooks work.",
+          "away_after": "Seconds without keyboard, mouse or trackpad input on the relay's computer after which At computer turns off (30–3600).",
           "webhook_url": "Optional. Tried first by the relay, before the internal and external URLs of Home Assistant."
         }
       }
     },
     "error": {
       "invalid_url": "Enter a full URL that starts with http or https.",
-      "invalid_interval": "Enter a whole number of seconds from 1 to 3600."
+      "invalid_interval": "Enter a whole number of seconds from 1 to 3600.",
+      "invalid_away_after": "Enter a whole number of seconds from 30 to 3600."
     }
   },
   "entity": {
@@ -52,6 +55,9 @@
       },
       "someone_in_earshot": {
         "name": "Someone in earshot"
+      },
+      "at_computer": {
+        "name": "At computer"
       }
     },
     "event": {
@@ -171,6 +177,9 @@
             "name": "Names"
           }
         }
+      },
+      "idle_time": {
+        "name": "Idle time"
       }
     },
     "switch": {

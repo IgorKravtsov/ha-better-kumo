@@ -33,12 +33,14 @@ class BetterKumoEntity(CoordinatorEntity[BetterKumoCoordinator]):
     @property
     def available(self) -> bool:
         """Unavailable while the relay or the desktop app is down."""
-        return super().available and self.coordinator.data is not None
+        data = self.coordinator.data
+        return super().available and data is not None and data.desktop is not None
 
     @property
     def state_data(self) -> dict[str, Any]:
         """The current DesktopState."""
-        return self.coordinator.data or {}
+        data = self.coordinator.data
+        return (data.desktop if data else None) or {}
 
     @property
     def me(self) -> dict[str, Any]:
@@ -55,3 +57,19 @@ class BetterKumoEntity(CoordinatorEntity[BetterKumoCoordinator]):
         finally:
             # The reply has no revision and a failed request may still have acted.
             self.coordinator.async_invalidate()
+
+
+class RelayEntity(BetterKumoEntity):
+    """An entity about the relay's computer, available whether or not Kumospace runs."""
+
+    @property
+    def available(self) -> bool:
+        """Unavailable only while the relay itself does not answer."""
+        data = self.coordinator.data
+        return self.coordinator.last_update_success and data is not None and data.relay_ok
+
+    @property
+    def idle_seconds(self) -> int | None:
+        """Seconds since the last input on the relay's computer."""
+        data = self.coordinator.data
+        return data.idle_seconds if data else None

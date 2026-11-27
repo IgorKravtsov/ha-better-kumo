@@ -17,6 +17,8 @@ One device, **Kumospace**, per relay:
 | `binary_sensor` In a call | on while you are in an audio/video conversation |
 | `binary_sensor` Someone in earshot | on while you hear someone |
 | `sensor` People in earshot | how many people you hear; attribute `names` lists them |
+| `binary_sensor` At computer | on while someone used the keyboard, mouse or trackpad of the relay's computer recently ([details](#at-computer)) |
+| `sensor` Idle time | diagnostic, disabled by default: seconds since that input |
 | `event` Messages | a chat message from someone else, in any channel (direct, group, public, threads) |
 | `event` Office events | nudges, knocks, people entering or leaving rooms, joining a floor, going online or offline, changing status, nearby chat |
 
@@ -63,9 +65,42 @@ actions:
       message: "{{ trigger.to_state.attributes.text }}"
 ```
 
+## At computer
+
+**At computer** (`binary_sensor.kumospace_at_computer`, device class `occupancy`: on is "Detected") is on while the
+relay's computer had keyboard, mouse or trackpad input less than **Away after idle** seconds ago (option, default
+300). It comes from `idle_seconds` in the relay's `GET /v1/status`, read together with `GET /v1/desktop` on every
+poll and after every webhook signal, so it follows the poll interval: with the default 30 s it turns on or off up to
+30 s late. It uses occupancy rather than presence because presence reads Home / Away, which would be mistaken for
+being at home.
+
+- It does not need Kumospace: it stays available while Kumospace desktop is closed or not in a space, as long as the
+  relay answers.
+- **Unavailable** while the relay does not answer: the computer is asleep, off or has its lid closed, or is
+  unreachable. Treat `unavailable` (and `unknown`) as **not at the computer** in automations: test for "not on"
+  rather than for "off", for example
+
+  ```yaml
+  conditions:
+    - condition: not
+      conditions:
+        - condition: state
+          entity_id: binary_sensor.kumospace_at_computer
+          state: "on"
+  ```
+- **Unknown** when the relay cannot tell: a relay older than
+  [better-kumo-app#66](https://github.com/IgorKravtsov/better-kumo-app/pull/66), a relay on Linux, or a relay on
+  Windows running as a service or as a task that runs whether or not you are logged on.
+- macOS needs no permission prompt for it (no Accessibility or Input Monitoring). It counts physical input only, so
+  an app that just keeps the screen awake does not count as you.
+
+The **Idle time** sensor shows the raw value. It is disabled by default because it changes on every poll and would
+fill the history; enable it under the device's diagnostic entities to tune **Away after idle**.
+
 ## Availability
 
-When the relay is unreachable, or Kumospace desktop is not connected to it, every entity is unavailable.
+When the relay is unreachable every entity is unavailable. When Kumospace desktop is not connected to it, every
+entity except **At computer** and **Idle time** is unavailable.
 `In a call` and the earshot entities stay `unknown` with a relay older than these fields. Webhooks, earshot, the
 call fields and keeping the status message need a relay with
 [better-kumo-app#61](https://github.com/IgorKravtsov/better-kumo-app/pull/61).
@@ -89,15 +124,18 @@ home. Pairing again with a new address or secret updates the existing entry.
 ## Options
 
 - **Poll interval**: seconds between reads of the relay state, 1–3600, default 30.
+- **Away after idle**: seconds without input on the relay's computer after which **At computer** turns off,
+  30–3600, default 300.
 - **Home Assistant URL for webhooks**: optional, for example `https://ha.example.com`. The relay tries it first.
 
 ## Push and polling
 
-Home Assistant polls `GET /v1/desktop` at the poll interval, always. On top of that it registers a webhook in the
+Home Assistant polls `GET /v1/desktop` and `GET /v1/status` (for the idle time) together at the poll interval,
+always. On top of that it registers a webhook in the
 relay, so changes show up within a fraction of a second:
 
 - A state delivery (`desktop` or `disconnected`) only tells Home Assistant that the state changed. It ignores the
-  snapshot in the body and reads `GET /v1/desktop` right away, one extra round trip to the relay; bursts of
+  snapshot in the body and reads `GET /v1/desktop` and `GET /v1/status` right away, in parallel; bursts of
   deliveries share one read. The read decides availability: if it fails, entities become unavailable. So a push
   helps only while Home Assistant can reach the relay; when it cannot, polling fails too and entities are
   unavailable. After every command the integration also reads the state again.

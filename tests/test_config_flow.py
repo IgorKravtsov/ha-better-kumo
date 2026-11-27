@@ -13,6 +13,7 @@ import voluptuous as vol
 
 from custom_components.better_kumo.api import parse_pairing_link
 from custom_components.better_kumo.const import (
+    CONF_AWAY_AFTER,
     CONF_POLL_INTERVAL,
     CONF_SECRET,
     CONF_WEBHOOK_SECRET,
@@ -135,6 +136,8 @@ async def test_repairing_updates_the_entry(
     )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
+    # The update reloads the entry; let it finish before teardown.
+    await hass.async_block_till_done()
     assert config_entry.data[CONF_URL] == url
     assert config_entry.data[CONF_SECRET] == "new"
     assert config_entry.data[CONF_WEBHOOK_SECRET] != WEBHOOK_SECRET
@@ -151,6 +154,15 @@ async def test_options(
             await hass.config_entries.options.async_configure(
                 result["flow_id"], {CONF_POLL_INTERVAL: bad}
             )
+    for bad in (29, 3601):
+        with pytest.raises(vol.Invalid):
+            await hass.config_entries.options.async_configure(
+                result["flow_id"], {CONF_POLL_INTERVAL: 5, CONF_AWAY_AFTER: bad}
+            )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_POLL_INTERVAL: 5, CONF_AWAY_AFTER: 60.5}
+    )
+    assert result["errors"] == {CONF_AWAY_AFTER: "invalid_away_after"}
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {CONF_POLL_INTERVAL: 5, CONF_WEBHOOK_URL: "ha.example.com"}
     )
@@ -164,12 +176,14 @@ async def test_options(
     )
     assert result["errors"] == {CONF_POLL_INTERVAL: "invalid_interval"}
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_POLL_INTERVAL: 5, CONF_WEBHOOK_URL: "https://ha.example.com/"}
+        result["flow_id"],
+        {CONF_POLL_INTERVAL: 5, CONF_AWAY_AFTER: 600, CONF_WEBHOOK_URL: "https://ha.example.com/"},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
     assert config_entry.options == {
         CONF_POLL_INTERVAL: 5,
+        CONF_AWAY_AFTER: 600,
         CONF_WEBHOOK_URL: "https://ha.example.com",
     }
     assert config_entry.runtime_data.update_interval.total_seconds() == 5

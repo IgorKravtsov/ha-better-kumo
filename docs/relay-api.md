@@ -25,6 +25,25 @@ the request body, which can carry the webhook secret), so a 3xx answer counts as
 
 ## Reading state
 
+### `GET /v1/status` (existing, extended)
+
+The relay's own status (snake_case JSON). The config flow reads `uid` from it as the entry's unique id. Polling
+reads it together with `GET /v1/desktop` for one field:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `idle_seconds` | `integer \| null`, optional | whole seconds since the last local keyboard, mouse or trackpad input on the relay's computer, read on every request. `null` when the relay can't tell (Linux; Windows in session 0); absent from relays older than [better-kumo-app#66](https://github.com/IgorKravtsov/better-kumo-app/pull/66). Never `0` for unknown. |
+
+```json
+{ "uid": "…", "enabled": true, "online": true, "ntfy": false, "apns": false, "devices": 1, "desktop": true,
+  "api": 3, "version": "…", "agents": true, "idle_seconds": 42 }
+```
+
+`GET /v1/status` answers whether or not Kumospace desktop is connected, so the **At computer** entity depends only
+on it: unavailable when it fails, unknown when `idle_seconds` is `null`, absent or not a non-negative integer, else
+on when `idle_seconds` is below the **Away after idle** option. `idle_seconds` is never in webhook deliveries (it
+changes every second), so it updates only on reads.
+
 ### `GET /v1/desktop` (existing, extended)
 
 Returns `DesktopState` (camelCase JSON): `floorId`, `floors`, `self` (`id`, `x`, `y`, `zoneId`, `availability`,
@@ -37,7 +56,9 @@ Errors are non-2xx answers:
 | 503 | Kumospace desktop is not connected to the relay, or is connected but not in a space |
 | 404 | the relay runs with the desktop bridge disabled |
 
-The integration treats any error (and an unreachable relay) the same way: every entity becomes unavailable.
+The integration treats any error the same way: every entity except **At computer** and **Idle time** becomes
+unavailable. Those two follow `GET /v1/status`; when both reads fail (the relay is unreachable), every entity is
+unavailable.
 
 **New fields:**
 
@@ -115,7 +136,7 @@ Body:
   by every URL), and a webhook registered later starts above 1. The integration drops bodies with a bad signature
   or envelope and uses `(boot, seq)` only to fire a redelivered `event` once.
 - `desktop` and `disconnected` are signals for this integration: it ignores the snapshot in the body and reads
-  `GET /v1/desktop` right away (one extra LAN round trip; bodies that arrive while a read is in flight cause one
+  `GET /v1/desktop` (and `GET /v1/status`) right away (one extra LAN round trip; bodies that arrive while a read is in flight cause one
   more read after it). Bodies and HTTP replies share no revision, so applying a delayed body could undo a newer
   read. Availability comes from that read: a failed read makes entities unavailable. If Home Assistant cannot reach
   the relay, pushes do not help, since polling fails too and entities stay unavailable.
@@ -167,5 +188,7 @@ relay may add kinds without breaking it.
 
 ## Polling
 
-The integration polls `GET /v1/desktop` on a configurable interval (1–3600 s, default 30 s) whether or not webhooks
-work. If the relay is unreachable or answers an error, every entity becomes unavailable.
+The integration polls `GET /v1/desktop` and `GET /v1/status` in parallel on a configurable interval (1–3600 s,
+default 30 s) whether or not webhooks work, and reads both again after every `desktop` or `disconnected` delivery.
+If `GET /v1/desktop` fails, the Kumospace entities become unavailable; if `GET /v1/status` fails, **At computer**
+and **Idle time** do; if both fail, the relay counts as unreachable.
