@@ -140,7 +140,8 @@ class RelayClient:
                     raise RelayAuthError(f"{action} failed: wrong relay secret (HTTP 401)")
                 if resp.status >= 300:
                     raise RelayError(http_error(action, resp.status, errors))
-                text = await resp.text()
+                # The relay sends UTF-8 JSON; a charset like base64 would raise LookupError.
+                text = await resp.text(encoding="utf-8")
         except TimeoutError:
             raise RelayError(f"{action} failed: relay not reachable: timed out") from None
         except (aiohttp.ClientSSLError, aiohttp.ClientConnectorCertificateError) as err:

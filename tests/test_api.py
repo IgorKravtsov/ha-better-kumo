@@ -138,6 +138,10 @@ async def test_wrong_secret(hass: HomeAssistant, aioclient_mock: AiohttpClientMo
         ({"content": b"\xff" + LEAK.encode()}, "unexpected reply from the relay: not UTF-8"),
         ({"text": f'["{LEAK}"]'}, "unexpected reply from the relay: not a JSON object"),
         (
+            {"text": "{}", "headers": {"Content-Type": "application/json; charset=base64"}},
+            None,
+        ),
+        (
             {"exc": aiohttp.ClientResponseError(None, (), message=f"Invalid header {LEAK}")},
             "relay not reachable (ClientResponseError)",
         ),
@@ -166,9 +170,12 @@ async def test_wrong_secret(hass: HomeAssistant, aioclient_mock: AiohttpClientMo
     ],
 )
 async def test_bad_reply_hides_the_body(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, reply: dict, reason: str
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, reply: dict, reason: str | None
 ) -> None:
     aioclient_mock.get(f"{RELAY}/v1/status", **reply)
+    if reason is None:
+        assert await client(hass).status() == {}
+        return
     with pytest.raises(RelayError) as err:
         await client(hass).status()
     assert str(err.value) == f"Reading the relay status failed: {reason}"
