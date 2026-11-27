@@ -8,8 +8,10 @@ import json
 from typing import Any
 from unittest.mock import patch
 
+from homeassistant.components.recorder.db_schema import MAX_STATE_ATTRS_BYTES
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, State
+from homeassistant.helpers.json import json_bytes
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -103,7 +105,6 @@ async def test_message_updates_messages(
         "at": 1764240000,
     }
     assert hass.states.get(OFFICE).state == STATE_UNKNOWN
-    # The bus event is unchanged and still fires for messages.
     assert [e.data for e in bus] == [{**MESSAGE, "config_entry_id": config_entry.entry_id}]
 
 
@@ -166,7 +167,6 @@ async def test_duplicate_triggers_once(hass: HomeAssistant, deliver) -> None:
     await deliver(4, MESSAGE)
     assert len(bus) == 1
     assert [c.data["entity_id"] for c in changes] == [MESSAGES]
-    # Another boot with the same seq is a new event.
     await deliver(4, MESSAGE, boot="b2")
     assert len(bus) == 2
     assert [c.data["entity_id"] for c in changes] == [MESSAGES, MESSAGES]
@@ -180,8 +180,28 @@ async def test_long_text_is_truncated(hass: HomeAssistant, deliver) -> None:
     assert len(a["text"]) == MAX_TEXT
     assert a["text"].endswith("…")
     assert len(a["chat"]) == MAX_FIELD
-    # The bus event keeps the full text.
     assert bus[0].data["text"] == text
+
+
+@pytest.mark.parametrize("kind", ["message", "knock"])
+async def test_worst_case_attributes_fit_the_recorder(
+    hass: HomeAssistant, deliver, kind: str
+) -> None:
+    long = "\U0001f600" * 5000
+    place = {"id": long, "name": long}
+    event = {
+        "kind": kind,
+        "at": {"nested": long},
+        "person": {"user_id": long, "name": long},
+        "room": place,
+        "floor": place,
+        **{key: long for key in ("chat", "text", "status", "channel", "channel_type")},
+    }
+    assert await deliver(1, event) == 200
+    entity_id = MESSAGES if kind == "message" else OFFICE
+    state = hass.states.get(entity_id)
+    assert len(state.attributes["at"]) == MAX_FIELD
+    assert len(json_bytes(dict(state.attributes))) < MAX_STATE_ATTRS_BYTES
 
 
 async def test_polling_never_triggers(
@@ -201,7 +221,6 @@ async def test_availability_follows_the_relay(
         await coordinator.async_refresh()
         await hass.async_block_till_done()
         assert hass.states.get(OFFICE).state == STATE_UNAVAILABLE
-        # An event that arrives meanwhile is kept and shown once the relay is back.
         await deliver(1, {"kind": "knock", "person": {"name": "Bob"}})
         assert hass.states.get(OFFICE).state == STATE_UNAVAILABLE
     await coordinator.async_refresh()

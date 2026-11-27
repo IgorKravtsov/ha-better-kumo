@@ -40,8 +40,8 @@ Attributes are capped so the recorder keeps them (it drops state attributes over
 characters and every other string to 255, cut ones ending in `…`. `better_kumo_event` keeps the full text.
 
 The event entities are unavailable when the other entities are. An event that arrives meanwhile is kept and shown
-when they come back, so an automation that triggers on the entity's state should ignore changes from
-`unavailable`. The last event is restored after a restart.
+when they come back, so an automation that triggers on the entity's state should ignore changes from and to
+`unavailable` (and to `unknown`). The last event is restored after a restart.
 
 Example: notify on a direct message or a mention.
 
@@ -49,7 +49,8 @@ Example: notify on a direct message or a mention.
 triggers:
   - trigger: state
     entity_id: event.kumospace_messages
-    not_from: [unavailable, unknown]
+    not_from: [unavailable]
+    not_to: [unavailable, unknown]
 conditions:
   - condition: template
     value_template: >-

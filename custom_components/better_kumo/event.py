@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from homeassistant.components.event import EventEntity
@@ -19,8 +20,7 @@ _LOGGER = logging.getLogger(__name__)
 MESSAGE = "message"
 OTHER = "other"
 
-# The recorder drops state attributes over 16 KiB (MAX_STATE_ATTRS_BYTES), so cap the strings:
-# text at 1024 characters, every other string at 255, at most 4 UTF-8 bytes per character.
+# Keep the worst-case UTF-8 attributes below the recorder's 16 KiB limit (MAX_STATE_ATTRS_BYTES).
 MAX_TEXT = 1024
 MAX_FIELD = 255
 
@@ -31,6 +31,13 @@ def _clip(value: Any, limit: int = MAX_FIELD) -> str | None:
         return None
     text = value if isinstance(value, str) else str(value)
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _at(value: Any) -> int | float | str | None:
+    """The relay's timestamp, kept numeric; anything else clipped like a string."""
+    if isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value):
+        return value
+    return _clip(value)
 
 
 def _part(event: dict[str, Any], key: str) -> dict[str, Any]:
@@ -53,10 +60,9 @@ def message_attributes(event: dict[str, Any]) -> dict[str, Any]:
             "text": _clip(event.get("text"), MAX_TEXT),
             "channel": _clip(event.get("channel")),
             "channel_type": _clip(event.get("channel_type")),
-            # The relay omits both flags when false.
             "mentions_me": event.get("mentions_me") is True,
             "thread": event.get("thread") is True,
-            "at": event.get("at"),
+            "at": _at(event.get("at")),
         }
     )
 
@@ -74,7 +80,7 @@ def office_attributes(event: dict[str, Any]) -> dict[str, Any]:
             "status": _clip(event.get("status")),
             "chat": _clip(event.get("chat")),
             "text": _clip(event.get("text"), MAX_TEXT),
-            "at": event.get("at"),
+            "at": _at(event.get("at")),
         }
     )
 

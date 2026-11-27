@@ -20,7 +20,6 @@ EVENT_BETTER_KUMO = "better_kumo_event"
 AVAILABILITIES = ["available", "away", "focusing"]
 CONF_SECRET = "secret"
 
-# Event kinds shown by the Office events entity; anything else but `message` becomes `other`.
 OFFICE_EVENT_TYPES = (
     "nudge",
     "knock",
