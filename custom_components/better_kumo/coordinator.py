@@ -81,5 +81,6 @@ class BetterKumoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
     async def _async_read_while_stale(self) -> None:
-        while self._stale:
+        # After shutdown async_refresh returns without reading or yielding.
+        while self._stale and not self._shutdown_requested:
             await self.async_refresh()

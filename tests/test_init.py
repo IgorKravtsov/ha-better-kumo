@@ -18,7 +18,7 @@ from pytest_homeassistant_custom_component.components.diagnostics import (
 )
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
-from custom_components.better_kumo.api import RelayError
+from custom_components.better_kumo.api import RelayError, is_desktop_state
 from custom_components.better_kumo.const import CONF_POLL_INTERVAL
 
 from .conftest import RELAY, SECRET, WEBHOOK_SECRET, desktop_state, setup_entry
@@ -151,15 +151,31 @@ async def test_media_switches(
     assert hass.states.get("switch.kumospace_camera").state == "on"
 
 
-async def test_command_error(
+async def test_command_error_still_reconciles(
     hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
 ) -> None:
     await setup_entry(hass, config_entry)
-    relay.post(f"{RELAY}/v1/desktop/media", status=503)
-    with pytest.raises(HomeAssistantError):
-        await hass.services.async_call(
-            "switch", "turn_off", {"entity_id": "switch.kumospace_microphone"}, blocking=True
-        )
+    relay.post(f"{RELAY}/v1/desktop/media", status=504)
+    client = config_entry.runtime_data.client
+    with patch.object(client, "desktop", return_value=desktop_state(audio=False)):
+        with pytest.raises(HomeAssistantError):
+            await hass.services.async_call(
+                "switch", "turn_off", {"entity_id": "switch.kumospace_microphone"}, blocking=True
+            )
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get("switch.kumospace_microphone").state == "off"
+
+
+async def test_no_reads_after_shutdown(
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    await setup_entry(hass, config_entry)
+    coordinator = config_entry.runtime_data
+    await coordinator.async_shutdown()
+    with patch.object(coordinator.client, "desktop") as read:
+        coordinator.async_invalidate()
+        await asyncio.wait_for(coordinator._reader, 1)
+    read.assert_not_called()
 
 
 async def test_unload_deletes_webhook(
@@ -282,7 +298,6 @@ async def test_reconciling_read_after_a_command_wins(
         patch.object(coordinator.client, "set_media", return_value=desktop_state(audio=False)),
         patch.object(coordinator.client, "desktop", side_effect=desktop) as read,
     ):
-        # This read started before the command and answers with the old state.
         coordinator.async_invalidate()
         await started.wait()
         await hass.services.async_call(
@@ -294,3 +309,8 @@ async def test_reconciling_read_after_a_command_wins(
     assert read.call_count == 2
     mic = hass.states.get("switch.kumospace_microphone").state
     assert mic == ("on" if relay_audio else "off")
+
+
+def test_person_id_must_be_a_string() -> None:
+    assert is_desktop_state(desktop_state())
+    assert not is_desktop_state(desktop_state(people=[{"id": ["p2"]}]))

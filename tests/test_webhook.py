@@ -70,7 +70,6 @@ async def test_desktop_signal_reads_the_relay(
     hass: HomeAssistant, post, relay: AiohttpClientMocker
 ) -> None:
     reads = desktop_reads(relay)
-    # The body's snapshot is ignored; the read answers inCall=False.
     body = {"boot": "b1", "seq": 1, "kind": "desktop", "desktop": desktop_state(inCall=True)}
     assert await post(body) == 200
     assert desktop_reads(relay) == reads + 1
@@ -101,7 +100,6 @@ async def test_signals_during_a_read_coalesce(
     with patch.object(
         config_entry.runtime_data.client, "desktop", side_effect=slow_desktop
     ) as desktop:
-        # Late, duplicate and reordered bodies all mean the same thing: read again.
         for seq in (2, 2, 1, 5):
             receiver.handle_payload("b1", seq, "desktop", {})
         await started.wait()
