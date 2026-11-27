@@ -33,11 +33,13 @@
         "data": {
           "poll_interval": "Poll interval",
           "away_after": "Away after idle",
+          "phone_in_use_for": "Phone counts as in use for",
           "webhook_url": "Home Assistant URL for webhooks"
         },
         "data_description": {
           "poll_interval": "How often to read the state from the relay, in seconds (1–3600). Polling runs even when webhooks work.",
           "away_after": "Seconds without keyboard, mouse or trackpad input on the relay's computer after which At computer turns off (30–3600).",
+          "phone_in_use_for": "Seconds after the Better Kumo phone app was last on screen during which Using phone stays on (30–3600); a call handed off to the phone keeps it on. The app reports every 30 s while open. Using phone is off when no phone has reported since the relay started, and unknown with a relay too old to report it.",
           "webhook_url": "Optional. Tried first by the relay, before the internal and external URLs of Home Assistant."
         }
       }
@@ -45,7 +47,8 @@
     "error": {
       "invalid_url": "Enter a full URL that starts with http or https.",
       "invalid_interval": "Enter a whole number of seconds from 1 to 3600.",
-      "invalid_away_after": "Enter a whole number of seconds from 30 to 3600."
+      "invalid_away_after": "Enter a whole number of seconds from 30 to 3600.",
+      "invalid_phone_in_use_for": "Enter a whole number of seconds from 30 to 3600."
     }
   },
   "entity": {
@@ -58,6 +61,9 @@
       },
       "at_computer": {
         "name": "At computer"
+      },
+      "using_phone": {
+        "name": "Using phone"
       }
     },
     "event": {
@@ -180,6 +186,9 @@
       },
       "idle_time": {
         "name": "Idle time"
+      },
+      "phone_idle_time": {
+        "name": "Phone idle time"
       }
     },
     "switch": {

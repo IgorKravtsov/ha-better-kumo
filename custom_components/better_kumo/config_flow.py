@@ -36,16 +36,20 @@ from .api import (
 from .const import (
     CONF_AWAY_AFTER,
     CONF_LINK,
+    CONF_PHONE_IN_USE_FOR,
     CONF_POLL_INTERVAL,
     CONF_SECRET,
     CONF_WEBHOOK_SECRET,
     CONF_WEBHOOK_URL,
     DEFAULT_AWAY_AFTER,
+    DEFAULT_PHONE_IN_USE_FOR,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
     MAX_AWAY_AFTER,
+    MAX_PHONE_IN_USE_FOR,
     MAX_POLL_INTERVAL,
     MIN_AWAY_AFTER,
+    MIN_PHONE_IN_USE_FOR,
     MIN_POLL_INTERVAL,
 )
 from .coordinator import BetterKumoConfigEntry
@@ -138,7 +142,7 @@ class BetterKumoConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class BetterKumoOptionsFlow(OptionsFlowWithReload):
-    """Poll interval, webhook URL override and the idle time that means away."""
+    """Poll interval, webhook URL override and the idle times that mean away."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle options."""
@@ -148,6 +152,7 @@ class BetterKumoOptionsFlow(OptionsFlowWithReload):
             for key, error in (
                 (CONF_POLL_INTERVAL, "invalid_interval"),
                 (CONF_AWAY_AFTER, "invalid_away_after"),
+                (CONF_PHONE_IN_USE_FOR, "invalid_phone_in_use_for"),
             ):
                 seconds = user_input[key]
                 # The selector's step=1 is only a UI hint; the API accepts 1.9 and "NaN".
@@ -177,6 +182,17 @@ class BetterKumoOptionsFlow(OptionsFlowWithReload):
                     NumberSelectorConfig(
                         min=MIN_AWAY_AFTER,
                         max=MAX_AWAY_AFTER,
+                        step=1,
+                        mode=NumberSelectorMode.BOX,
+                        unit_of_measurement="s",
+                    )
+                ),
+                vol.Required(
+                    CONF_PHONE_IN_USE_FOR, default=DEFAULT_PHONE_IN_USE_FOR
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=MIN_PHONE_IN_USE_FOR,
+                        max=MAX_PHONE_IN_USE_FOR,
                         step=1,
                         mode=NumberSelectorMode.BOX,
                         unit_of_measurement="s",

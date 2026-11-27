@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -76,12 +77,39 @@ def is_desktop_state(state: Any) -> bool:
     )
 
 
-def idle_seconds(status: dict[str, Any]) -> int | None:
-    """Seconds since the last input on the relay's computer; None when unknown."""
-    value = status.get("idle_seconds")
+def _seconds(value: Any) -> int | None:
+    """A whole number of seconds as the relay sends it (u64); None otherwise."""
     if isinstance(value, int) and not isinstance(value, bool) and 0 <= value < 2**64:
         return value
     return None
+
+
+def idle_seconds(status: dict[str, Any]) -> int | None:
+    """Seconds since the last input on the relay's computer; None when unknown."""
+    return _seconds(status.get("idle_seconds"))
+
+
+@dataclass(frozen=True, slots=True)
+class RelayStatus:
+    """The fields of GET /v1/status that entities show."""
+
+    idle_seconds: int | None = None
+    """Seconds since the last input on the relay's computer; None when unknown."""
+    phone_known: bool = False
+    """The relay sent phone_idle_seconds as null or a valid number (not absent or malformed)."""
+    phone_idle_seconds: int | None = None
+    """Seconds since the phone app was last in the foreground; None when no phone reported."""
+
+
+def relay_status(status: dict[str, Any]) -> RelayStatus:
+    """Parse GET /v1/status; a missing or malformed field leaves its value unknown."""
+    phone = status.get("phone_idle_seconds")
+    phone_seconds = _seconds(phone)
+    return RelayStatus(
+        idle_seconds=idle_seconds(status),
+        phone_known="phone_idle_seconds" in status and (phone is None or phone_seconds is not None),
+        phone_idle_seconds=phone_seconds,
+    )
 
 
 # Remote error bodies may contain secrets, so messages use fixed text per status.

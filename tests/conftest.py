@@ -67,6 +67,7 @@ def relay_status(**overrides: Any) -> dict[str, Any]:
         "version": "0.2.17",
         "agents": True,
         "idle_seconds": 12,
+        "phone_idle_seconds": 20,
     }
     status.update(overrides)
     return status

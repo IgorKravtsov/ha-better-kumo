@@ -3,7 +3,8 @@
     "binary_sensor": {
       "in_call": { "default": "mdi:phone-off", "state": { "on": "mdi:phone-in-talk" } },
       "someone_in_earshot": { "default": "mdi:ear-hearing-off", "state": { "on": "mdi:ear-hearing" } },
-      "at_computer": { "default": "mdi:monitor-off", "state": { "on": "mdi:monitor-account" } }
+      "at_computer": { "default": "mdi:monitor-off", "state": { "on": "mdi:monitor-account" } },
+      "using_phone": { "default": "mdi:cellphone-off", "state": { "on": "mdi:cellphone-check" } }
     },
     "event": {
       "messages": { "default": "mdi:message-text" },
@@ -16,7 +17,8 @@
       "status": { "default": "mdi:account-circle" },
       "room": { "default": "mdi:door" },
       "earshot_count": { "default": "mdi:account-voice" },
-      "idle_time": { "default": "mdi:timer-sand" }
+      "idle_time": { "default": "mdi:timer-sand" },
+      "phone_idle_time": { "default": "mdi:cellphone-information" }
     },
     "switch": {
       "microphone": { "default": "mdi:microphone-off", "state": { "on": "mdi:microphone" } },

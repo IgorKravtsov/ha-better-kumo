@@ -1,4 +1,4 @@
-"""Sensors: status, room, people in earshot, idle time."""
+"""Sensors: status, room, people in earshot, idle times."""
 
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ async def async_setup_entry(
             RoomSensor(coordinator, "room"),
             EarshotCountSensor(coordinator, "earshot_count"),
             IdleTimeSensor(coordinator.status, "idle_time"),
+            PhoneIdleTimeSensor(coordinator.status, "phone_idle_time"),
         ]
     )
 
@@ -88,4 +89,13 @@ class IdleTimeSensor(RelayEntity, SensorEntity):
     @property
     def native_value(self) -> int | None:
         """Return the idle time."""
-        return self.idle_seconds
+        return self.relay_status.idle_seconds
+
+
+class PhoneIdleTimeSensor(IdleTimeSensor):
+    """Seconds since the phone app was last in the foreground, for debugging Using phone."""
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the phone idle time; None when no phone reported or on an older relay."""
+        return self.relay_status.phone_idle_seconds

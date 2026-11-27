@@ -9,7 +9,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import RelayError
+from .api import RelayError, RelayStatus
 from .const import DOMAIN
 from .coordinator import BetterKumoCoordinator, StatusCoordinator
 
@@ -65,6 +65,6 @@ class RelayEntity(KumospaceDeviceEntity[StatusCoordinator]):
     """An entity about the relay's computer, following GET /v1/status alone."""
 
     @property
-    def idle_seconds(self) -> int | None:
-        """Seconds since the last input on the relay's computer."""
-        return self.coordinator.data
+    def relay_status(self) -> RelayStatus:
+        """The last GET /v1/status read."""
+        return self.coordinator.data or RelayStatus()
