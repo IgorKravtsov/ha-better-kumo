@@ -35,7 +35,11 @@ def _clip(value: Any, limit: int = MAX_FIELD) -> str | None:
 
 def _at(value: Any) -> int | float | str | None:
     """The relay's timestamp, kept numeric; anything else clipped like a string."""
-    if isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value):
+    if isinstance(value, bool):
+        return _clip(value)
+    if (isinstance(value, int) and abs(value) < 2**63) or (
+        isinstance(value, float) and math.isfinite(value)
+    ):
         return value
     return _clip(value)
 

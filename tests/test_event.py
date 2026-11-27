@@ -204,6 +204,14 @@ async def test_worst_case_attributes_fit_the_recorder(
     assert len(json_bytes(dict(state.attributes))) < MAX_STATE_ATTRS_BYTES
 
 
+@pytest.mark.parametrize(
+    ("at", "shown"), [(1764240000, 1764240000), (1.5, 1.5), (10**400, "1" + "0" * 253 + "…")]
+)
+async def test_timestamp(hass: HomeAssistant, deliver, at: Any, shown: Any) -> None:
+    assert await deliver(1, {**MESSAGE, "at": at}) == 200
+    assert attrs(hass, MESSAGES)["at"] == shown
+
+
 async def test_polling_never_triggers(
     hass: HomeAssistant, deliver, config_entry: MockConfigEntry
 ) -> None:
