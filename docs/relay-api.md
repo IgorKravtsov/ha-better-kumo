@@ -157,7 +157,7 @@ chat message in every channel (direct, group, public, threads) except my own.
 | `chat` | `string` | the channel title |
 | `text` | `string` | the message text |
 | `channel` | `string`, optional | the channel url |
-| `channel_type` | `string`, optional | for example `direct`, `group` or `public` |
+| `channel_type` | `string`, optional | `direct`, `group`, `channel` (a public channel) or `other` |
 | `mentions_me` | `bool`, optional | the message mentions me; omitted when false |
 | `thread` | `bool`, optional | the message is a thread reply; omitted when false |
 

@@ -28,8 +28,8 @@ through the webhook, each `(boot, seq)` once; polling recovers state, not missed
 event entities.
 
 - **Messages** (`event.kumospace_messages`), event type `message`. Attributes: `sender`, `sender_id`, `chat` (the
-  channel title), `text`, `channel` (the channel url), `channel_type` (as the relay sends it, for example `direct`,
-  `group` or `public`), `mentions_me`, `thread` and `at`. Filter on the attributes in a condition, for example
+  channel title), `text`, `channel` (the channel url), `channel_type` (as the relay sends it: `direct`,
+  `group`, `channel` for a public channel, or `other`), `mentions_me`, `thread` and `at`. Filter on the attributes in a condition, for example
   `mentions_me` is `true` or `channel_type` is `direct`. Your own messages are not sent by the relay.
 - **Office events** (`event.kumospace_office_events`), one event type per kind: `nudge`, `knock`,
   `entered_room`, `left_room`, `joined_floor`, `online`, `offline`, `status`, `nearby_chat`. A kind this version
