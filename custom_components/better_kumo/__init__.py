@@ -25,6 +25,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: BetterKumoConfigEntry) -
         async_get_clientsession(hass), entry.data[CONF_URL], entry.data[CONF_SECRET]
     )
     coordinator = BetterKumoCoordinator(hass, entry, client)
+    # Before any await: a re-pair meanwhile must not hand its new signing key to the old relay.
+    receiver = coordinator.receiver = WebhookReceiver(hass, entry, coordinator)
     # Not async_config_entry_first_refresh: a relay or desktop that is down at
     # startup should give unavailable entities, not a setup retry loop.
     await coordinator.async_refresh()
@@ -33,8 +35,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: BetterKumoConfigEntry) -
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # Last, so a failed setup cannot leave a registration the relay keeps on disk.
-    coordinator.receiver = WebhookReceiver(hass, entry, coordinator)
-    await coordinator.receiver.async_setup()
+    await receiver.async_setup()
     return True
 
 

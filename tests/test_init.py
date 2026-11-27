@@ -19,7 +19,7 @@ from pytest_homeassistant_custom_component.components.diagnostics import (
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
 from custom_components.better_kumo.api import RelayError, is_desktop_state
-from custom_components.better_kumo.const import CONF_POLL_INTERVAL
+from custom_components.better_kumo.const import CONF_POLL_INTERVAL, CONF_WEBHOOK_SECRET
 
 from .conftest import RELAY, SECRET, WEBHOOK_SECRET, desktop_state, setup_entry
 
@@ -409,3 +409,35 @@ async def test_cancelled_queued_command_is_never_sent(
             with pytest.raises(asyncio.CancelledError):
                 await task
     media.assert_not_called()
+
+
+async def test_long_room_name_is_truncated(
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    zone = {"id": "z1", "name": "K" * 300, "x": 0, "y": 0, "w": 9, "h": 9, "open": True}
+    with patch(
+        "custom_components.better_kumo.api.RelayClient.desktop",
+        return_value=desktop_state(zones=[zone]),
+    ):
+        await setup_entry(hass, config_entry)
+    assert hass.states.get("sensor.kumospace_room").state == "K" * 255
+
+
+async def test_repair_during_setup_keeps_the_old_key_for_the_old_relay(
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    config_entry.add_to_hass(hass)
+
+    async def desktop(*args):
+        hass.config_entries.async_update_entry(
+            config_entry, data={**config_entry.data, CONF_WEBHOOK_SECRET: "cd" * 32}
+        )
+        return desktop_state()
+
+    with patch(
+        "custom_components.better_kumo.api.RelayClient.desktop", side_effect=desktop, autospec=True
+    ):
+        await setup_entry(hass, config_entry)
+    puts = [c for c in relay.mock_calls if c[0] == "PUT"]
+    assert puts
+    assert puts[0][2]["secret"] == WEBHOOK_SECRET

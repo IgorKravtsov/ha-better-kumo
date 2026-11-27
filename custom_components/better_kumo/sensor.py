@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.const import MAX_LENGTH_STATE_STATE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -50,8 +51,9 @@ class RoomSensor(BetterKumoEntity, SensorEntity):
         """Return the zone name, or None outside rooms."""
         zone_id = self.me.get("zoneId")
         for zone in self.state_data.get("zones") or []:
-            if zone.get("id") == zone_id:
-                return zone.get("name")
+            if zone.get("id") == zone_id and (name := zone.get("name")) is not None:
+                # HA refuses to write a longer state.
+                return str(name)[:MAX_LENGTH_STATE_STATE]
         return None
 
 
