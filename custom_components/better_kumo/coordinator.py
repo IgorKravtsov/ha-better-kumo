@@ -27,10 +27,8 @@ type BetterKumoConfigEntry = ConfigEntry[BetterKumoCoordinator]
 class RelayData:
     """What one read learned from the relay."""
 
-    # None while Kumospace desktop is not connected to the relay; its entities are then unavailable.
     desktop: dict[str, Any] | None = None
     desktop_error: str | None = None
-    # GET /v1/status answered, so the relay's computer is awake whether or not Kumospace runs.
     relay_ok: bool = False
     idle_seconds: int | None = None
 
@@ -76,9 +74,7 @@ class BetterKumoCoordinator(DataUpdateCoordinator[RelayData]):
             idle = idle_seconds(status) if isinstance(status, dict) else None
             # A command reply landed while this read was in flight; the read may predate it.
             if generation != self.generation and self.data is not None:
-                if not relay_ok:
-                    return self.data
-                return replace(self.data, relay_ok=True, idle_seconds=idle)
+                return replace(self.data, relay_ok=relay_ok, idle_seconds=idle)
             if isinstance(desktop, RelayError):
                 # Only a relay that answers neither is down; Kumospace alone being away is not.
                 if not relay_ok:

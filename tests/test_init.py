@@ -94,7 +94,6 @@ async def test_desktop_unavailable_then_recovers(
     assert config_entry.state is ConfigEntryState.LOADED
     for entity_id in ENTITIES:
         assert hass.states.get(entity_id).state == STATE_UNAVAILABLE, entity_id
-    # Being at the computer does not depend on Kumospace.
     assert hass.states.get(AT_COMPUTER).state == "on"
 
     aioclient_mock.clear_requests()
@@ -537,3 +536,25 @@ async def test_repair_during_setup_keeps_the_old_key_for_the_old_relay(
     puts = [c for c in relay.mock_calls if c[0] == "PUT"]
     assert puts
     assert puts[0][2]["secret"] == WEBHOOK_SECRET
+
+
+async def test_command_during_a_read_keeps_that_reads_failed_status(
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    await setup_entry(hass, config_entry)
+    assert hass.states.get(AT_COMPUTER).state == "on"
+    coordinator = config_entry.runtime_data
+    gate = asyncio.Event()
+
+    async def slow_failure():
+        await gate.wait()
+        raise RelayError("relay not reachable")
+
+    with patch.object(coordinator.client, "status", side_effect=slow_failure):
+        task = hass.async_create_task(coordinator.async_refresh())
+        await asyncio.sleep(0)
+        coordinator.async_apply(desktop_state(inCall=True))
+        gate.set()
+        await task
+    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
+    assert hass.states.get(AT_COMPUTER).state == STATE_UNAVAILABLE

@@ -74,7 +74,6 @@ async def test_desktop_signal_reads_the_relay(
     body = {"boot": "b1", "seq": 1, "kind": "desktop", "desktop": desktop_state(inCall=True)}
     assert await post(body) == 200
     assert desktop_reads(relay) == reads + 1
-    # The same read refreshes the idle time.
     assert sum(1 for c in relay.mock_calls if str(c[1]).endswith("/v1/status")) == status_reads + 1
     assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
 
