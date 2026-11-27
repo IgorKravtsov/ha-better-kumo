@@ -47,12 +47,8 @@ The integration treats any error (and an unreachable relay) the same way: every 
 | `inCall` | `bool` | I am in an audio/video conversation (the same signal as `inCall` in the Meetings page tick). |
 | `call` | `{ "roomName": string, "peers": string[] } \| null` | the current Daily call; non-null while the desktop is in the call and while the call is handed off to a phone. It never contains the call's `url` or `token`. |
 
-### `GET /v1/events` (existing, used only for the boot id)
-
-Without parameters it answers at once with `EventsPage { boot, latest, events: [], desktopConnected }`. The
-integration calls it only to learn the running relay's `boot` (see Delivery). It does not read the office event
-log: `better_kumo_event` is fired only from `event` webhook deliveries, so it needs working webhooks; polling
-recovers desktop state only.
+Office events (`better_kumo_event`) are fired only from `event` webhook deliveries, so they need working webhooks;
+polling recovers desktop state only. The integration does not call `GET /v1/events`.
 
 ## Commands (existing)
 
@@ -61,7 +57,8 @@ recovers desktop state only.
 | set status | `POST /v1/desktop/status` `{"availability":"available"\|"away"\|"focusing"}` |
 | microphone / camera | `POST /v1/desktop/media` `{"audio":bool}` / `{"video":bool}` |
 
-Each returns the new `DesktopState`; the integration applies it immediately.
+Each returns the new `DesktopState`; the integration applies it at once and then reads `GET /v1/desktop`, since
+the reply carries no revision to order it against other reads.
 
 - `POST /v1/desktop/status`: `message` is optional. Omitted keeps the current status message, `""` clears it.
   The integration never sends it.
@@ -113,23 +110,21 @@ Body:
 { "boot": "<relay boot id>", "seq": 44, "kind": "disconnected" }
 ```
 
-- `seq` is one counter per relay boot, and a new `boot` restarts it. Every body goes to every webhook with the same
-  `seq`, so a gap means bodies this receiver did not get (dropped from a full queue or refused by every URL), and a
-  webhook registered later starts above 1. The receiver only needs `seq` to grow: it drops bodies with a bad
-  signature, and `desktop`/`disconnected` bodies whose `seq` is not newer than the last applied one in the same
-  `boot` or that come from a boot it has moved on from. Boot ids are random and a stopped relay's bodies can still
-  arrive late, so on a `desktop`/`disconnected` body from an unfamiliar boot the receiver asks `GET /v1/events`
-  for the running boot. It switches to that boot (applying the newest body it held from it, or polling when it has
-  none) and from then on drops the boot it replaced; held bodies of other boots are dropped, and a later body from
-  one of them is checked again.
+- `seq` is one counter per relay boot (`0 ≤ seq ≤ 2^64−1`), and a new `boot` restarts it. Every body goes to every
+  webhook with the same `seq`, so a gap means bodies this receiver did not get (dropped from a full queue or refused
+  by every URL), and a webhook registered later starts above 1. The integration drops bodies with a bad signature
+  or envelope and uses `(boot, seq)` only to fire a redelivered `event` once.
+- `desktop` and `disconnected` are signals for this integration: it ignores the snapshot in the body and reads
+  `GET /v1/desktop` right away (one extra LAN round trip; bodies that arrive while a read is in flight cause one
+  more read after it). Bodies and HTTP replies share no revision, so applying a delayed body could undo a newer
+  read. Availability comes from that read: a failed read makes entities unavailable. If Home Assistant cannot reach
+  the relay, pushes do not help, since polling fails too and entities stay unavailable.
 - `desktop` is sent when the snapshot changes. The relay reads the state 250 ms after an office frame, a
   (dis)connect or a registration change, and otherwise about every 1.25 s, since Daily changes such as earshot and
   the call send no office frame. Position-only changes (`x`/`y` of `self` or `people`) are not sent; any other
   change is.
 - `disconnected` is sent when the state can no longer be read after a `desktop` was sent: Kumospace desktop went
-  away, or runs but is not in a space (the same cases where `GET /v1/desktop` answers 503). The integration marks
-  entities unavailable and polls at once, since a late `disconnected` can follow a poll that already saw the
-  reconnect.
+  away, or runs but is not in a space (the same cases where `GET /v1/desktop` answers 503).
 - At relay start and after a new or changed registration, the relay sends the current `desktop` or
   `disconnected` on its next read, to every registered webhook.
 - `event` is sent for every entry the relay's event log records.

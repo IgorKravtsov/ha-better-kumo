@@ -46,14 +46,10 @@ class BetterKumoEntity(CoordinatorEntity[BetterKumoCoordinator]):
         return self.state_data.get("self") or {}
 
     async def _command(self, request: Awaitable[dict[str, Any]]) -> None:
-        coordinator = self.coordinator
-        generation, polls = coordinator.generation, coordinator.polls_started
         try:
             state = await request
         except RelayError as err:
             raise HomeAssistantError(f"Better Kumo relay: {err}") from err
-        if generation == coordinator.generation and coordinator.applied_poll <= polls:
-            coordinator.async_apply(state)
-        else:
-            # Something newer landed meanwhile, but it may predate this command's effect.
-            await coordinator.async_request_refresh()
+        self.coordinator.async_apply(state)
+        # The reply has no revision, so a read started after it settles the state.
+        self.coordinator.async_invalidate()

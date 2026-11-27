@@ -51,7 +51,13 @@ home. Pairing again with a new address or secret updates the existing entry.
 ## Push and polling
 
 Home Assistant polls `GET /v1/desktop` at the poll interval, always. On top of that it registers a webhook in the
-relay, so changes arrive within a fraction of a second:
+relay, so changes show up within a fraction of a second:
+
+- A state delivery (`desktop` or `disconnected`) only tells Home Assistant that the state changed. It ignores the
+  snapshot in the body and reads `GET /v1/desktop` right away, one extra round trip to the relay; bursts of
+  deliveries share one read. The read decides availability: if it fails, entities become unavailable. So a push
+  helps only while Home Assistant can reach the relay; when it cannot, polling fails too and entities are
+  unavailable. After every command the integration also reads the state again.
 
 - On startup and every 10 minutes the integration sends the relay an ordered list of URLs for its webhook: the
   override from the options (if set), the internal URL of Home Assistant (or its detected LAN address when no
@@ -59,8 +65,7 @@ relay, so changes arrive within a fraction of a second:
   through the rest, so a laptop away from home can still push through the external URL. The relay does not
   follow redirects, so each URL must reach Home Assistant directly (for example `https://`, not an `http://`
   address that redirects to it).
-- Every delivery is signed with a per-entry secret (HMAC-SHA256). Deliveries with a bad signature, and state
-  older than the last applied one, are dropped. Because of the signature the webhook accepts requests from outside
+- Every delivery is signed with a per-entry secret (HMAC-SHA256). Deliveries with a bad signature are dropped. Because of the signature the webhook accepts requests from outside
   the local network, which the external URL and Tailscale addresses (not "local" to Home Assistant) need.
 - If registration fails (for example an older relay without webhooks), the integration keeps working on polling
   and logs one warning. The webhook URLs are in the integration's diagnostics.

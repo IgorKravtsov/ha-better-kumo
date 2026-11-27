@@ -31,8 +31,6 @@ async def async_get_config_entry_diagnostics(
             "urls": webhook_urls(hass, entry),
             "registered_urls": receiver.registered_urls if receiver else [],
             "registration_error": receiver.last_error if receiver else None,
-            "last_boot": receiver.boot if receiver else None,
-            "last_seq": receiver.seq if receiver else None,
         },
         "last_update_success": coordinator.last_update_success,
         "last_error": str(coordinator.last_exception) if coordinator.last_exception else None,

@@ -8,10 +8,7 @@ from homeassistant.const import CONF_URL, CONF_WEBHOOK_ID
 from homeassistant.core import HomeAssistant
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
-from pytest_homeassistant_custom_component.test_util.aiohttp import (
-    AiohttpClientMocker,
-    AiohttpClientMockResponse,
-)
+from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
 from custom_components.better_kumo.const import CONF_SECRET, CONF_WEBHOOK_SECRET, DOMAIN
 
@@ -73,27 +70,12 @@ def config_entry() -> MockConfigEntry:
 
 
 @pytest.fixture
-def relay_boot() -> list[str | None]:
-    """Boot id the relay reports in GET /v1/events; tests change [0], None fails the call."""
-    return ["b1"]
-
-
-@pytest.fixture
 def relay(
     aioclient_mock: AiohttpClientMocker,
     config_entry: MockConfigEntry,
-    relay_boot: list[str | None],
 ) -> AiohttpClientMocker:
     """A healthy relay."""
-
-    async def events(method: str, url: Any, data: Any) -> AiohttpClientMockResponse:
-        if relay_boot[0] is None:
-            return AiohttpClientMockResponse(method, url, status=500)
-        page = {"boot": relay_boot[0], "latest": 0, "events": [], "desktopConnected": True}
-        return AiohttpClientMockResponse(method, url, json=page)
-
     aioclient_mock.get(f"{RELAY}/v1/desktop", json=desktop_state())
-    aioclient_mock.get(f"{RELAY}/v1/events", side_effect=events)
     hook = f"{RELAY}/v1/webhooks/{config_entry.entry_id}"
     aioclient_mock.put(hook, json={"id": config_entry.entry_id, "urls": []})
     aioclient_mock.delete(hook, status=204)

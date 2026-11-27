@@ -45,7 +45,6 @@ def normalize_url(url: str) -> str:
     url = url.strip().rstrip("/")
     parts = urlsplit(url)
     # Endpoint paths are appended to this string, so a query or fragment would swallow them.
-    # Reading .port raises ValueError for a non-numeric or out-of-range port.
     if (
         parts.scheme not in ("http", "https")
         or not parts.hostname
@@ -125,13 +124,6 @@ class RelayClient:
     async def desktop(self) -> dict[str, Any]:
         """GET /v1/desktop."""
         return await self._desktop("GET", "/v1/desktop")
-
-    async def boot(self) -> str:
-        """Boot id of the running relay, from GET /v1/events (returns at once without params)."""
-        boot = (await self._object("GET", "/v1/events")).get("boot")
-        if not isinstance(boot, str):
-            raise RelayError("unexpected reply from the relay: no boot id")
-        return boot
 
     async def set_availability(self, availability: str) -> dict[str, Any]:
         """POST /v1/desktop/status."""

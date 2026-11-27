@@ -1,7 +1,8 @@
-"""Polling coordinator that also accepts pushed state."""
+"""Polling coordinator that also reads on request."""
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 import logging
 from typing import TYPE_CHECKING, Any
@@ -40,37 +41,30 @@ class BetterKumoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.client = client
         self.generation = 0
-        self.polls_started = 0
-        # Start number of the newest poll whose result (success or failure) was applied.
-        self.applied_poll = 0
+        self._stale = False
+        self._reader: asyncio.Task[None] | None = None
         self.receiver: WebhookReceiver | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
+        # Reads are serialized, so this one sees every change signalled before it started.
+        self._stale = False
         generation = self.generation
-        self.polls_started += 1
-        poll = self.polls_started
         try:
             data = await self.client.desktop()
         except RelayError as err:
             if generation != self.generation and self.last_update_success:
                 return self.data
-            self.applied_poll = poll
             raise UpdateFailed(str(err)) from err
-        # A push or command landed while this poll was in flight; it is newer.
+        # A command reply landed while this read was in flight; the read may predate it.
         if generation != self.generation:
             if not self.last_update_success:
                 raise UpdateFailed(str(self.last_exception))
             return self.data
-        self.applied_poll = poll
         return data
 
     @callback
     def async_apply(self, data: dict[str, Any]) -> None:
-        """Apply a pushed or command-returned state.
-
-        Unlike async_set_updated_data this keeps the poll timer running, so polling
-        stays on its schedule even while pushes arrive.
-        """
+        """Apply a command-returned state, keeping the poll timer running."""
         self.generation += 1
         self.data = data
         self.last_update_success = True
@@ -78,11 +72,14 @@ class BetterKumoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.async_update_listeners()
 
     @callback
-    def async_mark_disconnected(self) -> None:
-        """Make entities unavailable until the next good poll or push."""
-        self.generation += 1
-        if self.last_update_success:
-            _LOGGER.info("Kumospace desktop disconnected from the relay")
-        self.last_update_success = False
-        self.last_exception = UpdateFailed("Kumospace desktop disconnected")
-        self.async_update_listeners()
+    def async_invalidate(self) -> None:
+        """Read the desktop state again soon, coalescing repeated requests."""
+        self._stale = True
+        if self._reader is None or self._reader.done():
+            self._reader = self.config_entry.async_create_background_task(
+                self.hass, self._async_read_while_stale(), "better_kumo refresh"
+            )
+
+    async def _async_read_while_stale(self) -> None:
+        while self._stale:
+            await self.async_refresh()

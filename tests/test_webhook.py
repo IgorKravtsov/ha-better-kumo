@@ -1,4 +1,4 @@
-"""Webhook push: signature, ordering, registration."""
+"""Webhook push: signature, state signals, events, registration."""
 
 from __future__ import annotations
 
@@ -62,77 +62,69 @@ def test_valid_signature() -> None:
     assert not valid_signature(WEBHOOK_SECRET, body, "sha256=\u00fc" * 8)
 
 
-async def test_desktop_push(hass: HomeAssistant, post) -> None:
-    state = desktop_state(inCall=True)
-    assert await post({"boot": "b1", "seq": 1, "kind": "desktop", "desktop": state}) == 200
-    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
+def desktop_reads(relay: AiohttpClientMocker) -> int:
+    return sum(1 for c in relay.mock_calls if str(c[1]).endswith("/v1/desktop"))
 
 
-async def test_bad_signature_is_dropped(hass: HomeAssistant, post) -> None:
-    payload = {"boot": "b1", "seq": 1, "kind": "desktop", "desktop": desktop_state(inCall=True)}
+async def test_desktop_signal_reads_the_relay(
+    hass: HomeAssistant, post, relay: AiohttpClientMocker
+) -> None:
+    reads = desktop_reads(relay)
+    # The body's snapshot is ignored; the read answers inCall=False.
+    body = {"boot": "b1", "seq": 1, "kind": "desktop", "desktop": desktop_state(inCall=True)}
+    assert await post(body) == 200
+    assert desktop_reads(relay) == reads + 1
+    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
+
+
+async def test_bad_signature_is_dropped(
+    hass: HomeAssistant, post, relay: AiohttpClientMocker
+) -> None:
+    reads = desktop_reads(relay)
+    payload = {"boot": "b1", "seq": 1, "kind": "desktop", "desktop": {}}
     assert await post(payload, signature="sha256=" + "0" * 64) == 401
-    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
+    assert desktop_reads(relay) == reads
 
 
-async def test_stale_seq_is_dropped(hass: HomeAssistant, post, relay_boot: list[str]) -> None:
-    await post({"boot": "b1", "seq": 5, "kind": "desktop", "desktop": desktop_state(inCall=True)})
-    for seq in (5, 4):
-        await post(
-            {"boot": "b1", "seq": seq, "kind": "desktop", "desktop": desktop_state(inCall=False)}
-        )
-        assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
-    relay_boot[0] = "b2"
-    await post({"boot": "b2", "seq": 1, "kind": "desktop", "desktop": desktop_state(inCall=False)})
-    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
-    await post({"boot": "b1", "seq": 9, "kind": "desktop", "desktop": desktop_state(inCall=True)})
-    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
-
-
-async def test_late_bodies_from_a_stopped_boot_are_dropped(
-    hass: HomeAssistant, post, relay_boot: list[str], config_entry: MockConfigEntry
+async def test_signals_during_a_read_coalesce(
+    hass: HomeAssistant, post, config_entry: MockConfigEntry
 ) -> None:
-    relay_boot[0] = "b2"
-    await post({"boot": "b2", "seq": 1, "kind": "desktop", "desktop": desktop_state(inCall=True)})
-    # Bodies of a relay process that stopped before b2 started, never seen before, arrive late.
-    for seq in (98, 99):
-        await post(
-            {"boot": "b1", "seq": seq, "kind": "desktop", "desktop": desktop_state(inCall=False)}
-        )
-        assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
-    with desktop_down(config_entry):
-        await post({"boot": "b2", "seq": 2, "kind": "disconnected"})
-    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == STATE_UNAVAILABLE
+    receiver = config_entry.runtime_data.receiver
+    started, gate = asyncio.Event(), asyncio.Event()
+    answers = [desktop_state(inCall=False), desktop_state(inCall=True)]
 
+    async def slow_desktop() -> dict[str, Any]:
+        started.set()
+        await gate.wait()
+        return answers.pop(0)
 
-async def test_unseen_running_boot_is_polled(
-    hass: HomeAssistant, post, relay: AiohttpClientMocker, relay_boot: list[str]
-) -> None:
-    relay_boot[0] = "b3"
-    polls = sum(1 for c in relay.mock_calls if str(c[1]).endswith("/v1/desktop"))
-    await post({"boot": "b2", "seq": 1, "kind": "desktop", "desktop": desktop_state(inCall=True)})
-    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
-    assert sum(1 for c in relay.mock_calls if str(c[1]).endswith("/v1/desktop")) == polls + 1
-    await post({"boot": "b3", "seq": 4, "kind": "desktop", "desktop": desktop_state(inCall=True)})
+    with patch.object(
+        config_entry.runtime_data.client, "desktop", side_effect=slow_desktop
+    ) as desktop:
+        # Late, duplicate and reordered bodies all mean the same thing: read again.
+        for seq in (2, 2, 1, 5):
+            receiver.handle_payload("b1", seq, "desktop", {})
+        await started.wait()
+        receiver.handle_payload("b1", 6, "disconnected", {})
+        gate.set()
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert desktop.call_count == 2
     assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
 
 
-async def test_failed_boot_check_drops_the_body(
-    hass: HomeAssistant, post, relay_boot: list[str | None]
+async def test_disconnected_signal_and_failed_read(
+    hass: HomeAssistant, post, config_entry: MockConfigEntry
 ) -> None:
-    relay_boot[0] = None
-    await post({"boot": "b1", "seq": 1, "kind": "desktop", "desktop": desktop_state(inCall=True)})
-    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
-
-
-async def test_disconnected(hass: HomeAssistant, post, config_entry: MockConfigEntry) -> None:
     with desktop_down(config_entry):
         await post({"boot": "b1", "seq": 1, "kind": "disconnected"})
     assert hass.states.get("sensor.kumospace_status").state == STATE_UNAVAILABLE
-    await post({"boot": "b1", "seq": 2, "kind": "desktop", "desktop": desktop_state()})
+    await post({"boot": "b1", "seq": 2, "kind": "desktop", "desktop": {}})
     assert hass.states.get("sensor.kumospace_status").state == "available"
 
 
-async def test_late_disconnected_is_checked_by_a_poll(hass: HomeAssistant, post) -> None:
+async def test_late_disconnected_signal_keeps_a_reachable_desktop(
+    hass: HomeAssistant, post
+) -> None:
     # The relay mock is healthy: this `disconnected` was sent before a reconnect.
     await post({"boot": "b1", "seq": 1, "kind": "disconnected"})
     assert hass.states.get("sensor.kumospace_status").state == "available"
@@ -160,8 +152,7 @@ async def test_duplicate_event_fires_once(hass: HomeAssistant, post) -> None:
     "payload",
     [
         {"seq": 1},
-        {"boot": "b1", "seq": 1, "kind": "desktop"},
-        {"boot": "b1", "seq": 1, "kind": "desktop", "desktop": []},
+        {"boot": "b1", "seq": 1, "kind": "event"},
         {"boot": "b1", "seq": 1, "kind": "event", "event": "x"},
         {"boot": 1, "seq": 1, "kind": "disconnected"},
         {"boot": "b1", "seq": True, "kind": "disconnected"},
@@ -169,15 +160,21 @@ async def test_duplicate_event_fires_once(hass: HomeAssistant, post) -> None:
         {"boot": "b1", "seq": 1e400, "kind": "disconnected"},
         {"boot": "b1", "seq": 1, "kind": ["desktop"]},
         {"boot": "b1", "seq": -1, "kind": "disconnected"},
-        {"boot": "b1", "seq": 1, "kind": "desktop", "desktop": desktop_state(people=[None])},
-        {"boot": "b1", "seq": 1, "kind": "desktop", "desktop": desktop_state(earshot="p2")},
+        {"boot": "b1", "seq": 2**64, "kind": "event", "event": {}},
     ],
 )
-async def test_malformed_body(hass: HomeAssistant, post, payload: dict) -> None:
+async def test_malformed_body(
+    hass: HomeAssistant, post, relay: AiohttpClientMocker, payload: dict
+) -> None:
+    reads = desktop_reads(relay)
     assert await post(payload) == 400
-    # A rejected body must not advance the watermark.
-    await post({"boot": "b1", "seq": 1, "kind": "desktop", "desktop": desktop_state(inCall=True)})
-    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
+    assert desktop_reads(relay) == reads
+
+
+async def test_largest_seq_is_accepted(hass: HomeAssistant, post) -> None:
+    events = async_capture_events(hass, EVENT_BETTER_KUMO)
+    assert await post({"boot": "b1", "seq": 2**64 - 1, "kind": "event", "event": {}}) == 200
+    assert len(events) == 1
 
 
 async def test_non_ascii_signature(hass: HomeAssistant, post) -> None:
@@ -233,107 +230,6 @@ async def test_registration_failure_keeps_polling(
     assert receiver.last_error
     await receiver.async_register()
     assert caplog.text.count("Could not register the webhook") == 1
-
-
-async def test_bodies_during_a_boot_check_keep_the_newest(
-    hass: HomeAssistant, post, config_entry: MockConfigEntry
-) -> None:
-    receiver = config_entry.runtime_data.receiver
-    gate = asyncio.Event()
-
-    async def slow_boot() -> str:
-        await gate.wait()
-        return "b1"
-
-    with patch.object(config_entry.runtime_data.client, "boot", side_effect=slow_boot):
-        for seq, in_call in ((2, True), (3, False), (1, True)):
-            receiver.handle_payload(
-                "b1", seq, "desktop", {"desktop": desktop_state(inCall=in_call)}
-            )
-        gate.set()
-        await hass.async_block_till_done(wait_background_tasks=True)
-    assert receiver.seq == 3
-    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
-
-
-async def test_relay_restart_during_a_boot_check(
-    hass: HomeAssistant, post, config_entry: MockConfigEntry
-) -> None:
-    receiver = config_entry.runtime_data.receiver
-    gate = asyncio.Event()
-    replies = ["b2", "b3"]
-
-    async def boot() -> str:
-        # The b2 reply is produced, then b2 stops and b3's first body arrives before HA reads it.
-        reply = replies.pop(0)
-        if reply == "b2":
-            await gate.wait()
-        return reply
-
-    with patch.object(config_entry.runtime_data.client, "boot", side_effect=boot):
-        receiver.handle_payload("b2", 1, "desktop", {"desktop": desktop_state(inCall=False)})
-        receiver.handle_payload("b3", 1, "desktop", {"desktop": desktop_state(inCall=True)})
-        gate.set()
-        await hass.async_block_till_done(wait_background_tasks=True)
-    assert (receiver.boot, receiver.seq) == ("b3", 1)
-    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
-    receiver.handle_payload("b3", 2, "desktop", {"desktop": desktop_state(inCall=False)})
-    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
-
-
-@pytest.mark.parametrize("kind", ["desktop", "disconnected"])
-async def test_held_body_older_than_a_poll_is_not_applied(
-    hass: HomeAssistant, post, config_entry: MockConfigEntry, kind: str
-) -> None:
-    receiver = config_entry.runtime_data.receiver
-    coordinator = config_entry.runtime_data
-    gate = asyncio.Event()
-
-    async def slow_boot() -> str:
-        await gate.wait()
-        return "b1"
-
-    with patch.object(coordinator.client, "boot", side_effect=slow_boot):
-        receiver.handle_payload("b1", 1, kind, {"desktop": desktop_state(inCall=True)})
-        await coordinator.async_refresh()
-        gate.set()
-        await hass.async_block_till_done(wait_background_tasks=True)
-    assert receiver.seq == 1
-    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "off"
-
-
-@pytest.mark.parametrize("kind", ["desktop", "disconnected"])
-async def test_held_body_newer_than_a_slow_poll_is_applied(
-    hass: HomeAssistant, post, config_entry: MockConfigEntry, kind: str
-) -> None:
-    receiver = config_entry.runtime_data.receiver
-    coordinator = config_entry.runtime_data
-    poll_read, poll_gate, boot_gate = asyncio.Event(), asyncio.Event(), asyncio.Event()
-
-    async def slow_desktop() -> dict[str, Any]:
-        if poll_read.is_set() and kind == "disconnected":
-            raise RelayError("relay returned 503")
-        poll_read.set()
-        await poll_gate.wait()
-        return desktop_state(inCall=False)
-
-    async def slow_boot() -> str:
-        await boot_gate.wait()
-        return "b1"
-
-    with (
-        patch.object(coordinator.client, "desktop", side_effect=slow_desktop),
-        patch.object(coordinator.client, "boot", side_effect=slow_boot),
-    ):
-        poll = hass.async_create_task(coordinator.async_refresh())
-        await poll_read.wait()
-        receiver.handle_payload("b1", 1, kind, {"desktop": desktop_state(inCall=True)})
-        poll_gate.set()
-        await poll
-        boot_gate.set()
-        await hass.async_block_till_done(wait_background_tasks=True)
-    expected = "on" if kind == "desktop" else STATE_UNAVAILABLE
-    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == expected
 
 
 async def test_unloading_receiver_rejects_bodies(

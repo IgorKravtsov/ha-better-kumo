@@ -117,12 +117,14 @@ async def test_select_status_sends_only_availability(
     away = desktop_state()
     away["self"] = {**away["self"], "availability": "away"}
     relay.post(f"{RELAY}/v1/desktop/status", json=away)
-    await hass.services.async_call(
-        "select",
-        "select_option",
-        {"entity_id": "select.kumospace_status", "option": "away"},
-        blocking=True,
-    )
+    with patch.object(config_entry.runtime_data.client, "desktop", return_value=away):
+        await hass.services.async_call(
+            "select",
+            "select_option",
+            {"entity_id": "select.kumospace_status", "option": "away"},
+            blocking=True,
+        )
+        await hass.async_block_till_done(wait_background_tasks=True)
     call = next(c for c in relay.mock_calls if str(c[1]).endswith("/v1/desktop/status"))
     assert call[2] == {"availability": "away"}
     assert call[3]["Authorization"] == f"Bearer {SECRET}"
@@ -133,13 +135,16 @@ async def test_media_switches(
     hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
 ) -> None:
     await setup_entry(hass, config_entry)
-    relay.post(f"{RELAY}/v1/desktop/media", json=desktop_state(audio=False, video=True))
-    await hass.services.async_call(
-        "switch", "turn_off", {"entity_id": "switch.kumospace_microphone"}, blocking=True
-    )
-    await hass.services.async_call(
-        "switch", "turn_on", {"entity_id": "switch.kumospace_camera"}, blocking=True
-    )
+    state = desktop_state(audio=False, video=True)
+    relay.post(f"{RELAY}/v1/desktop/media", json=state)
+    with patch.object(config_entry.runtime_data.client, "desktop", return_value=state):
+        await hass.services.async_call(
+            "switch", "turn_off", {"entity_id": "switch.kumospace_microphone"}, blocking=True
+        )
+        await hass.services.async_call(
+            "switch", "turn_on", {"entity_id": "switch.kumospace_camera"}, blocking=True
+        )
+        await hass.async_block_till_done(wait_background_tasks=True)
     bodies = [c[2] for c in relay.mock_calls if str(c[1]).endswith("/v1/desktop/media")]
     assert bodies == [{"audio": False}, {"video": True}]
     assert hass.states.get("switch.kumospace_microphone").state == "off"
@@ -186,27 +191,7 @@ async def test_diagnostics_redacts_secrets(
     assert "hi" not in str(diag["desktop"]["self"])
 
 
-async def test_poll_older_than_disconnect_push_is_ignored(
-    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
-) -> None:
-    await setup_entry(hass, config_entry)
-    coordinator = config_entry.runtime_data
-    gate = asyncio.Event()
-
-    async def slow_desktop():
-        await gate.wait()
-        return desktop_state()
-
-    with patch.object(coordinator.client, "desktop", side_effect=slow_desktop):
-        task = hass.async_create_task(coordinator.async_refresh())
-        await asyncio.sleep(0)
-        coordinator.async_mark_disconnected()
-        gate.set()
-        await task
-    assert hass.states.get("sensor.kumospace_status").state == STATE_UNAVAILABLE
-
-
-async def test_poll_failure_older_than_push_is_ignored(
+async def test_read_failure_older_than_command_is_ignored(
     hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
 ) -> None:
     await setup_entry(hass, config_entry)
@@ -226,7 +211,7 @@ async def test_poll_failure_older_than_push_is_ignored(
     assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
 
 
-async def test_poll_older_than_command_keeps_command_state(
+async def test_read_older_than_command_is_ignored(
     hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
 ) -> None:
     await setup_entry(hass, config_entry)
@@ -276,41 +261,36 @@ async def test_unload_waits_for_inflight_registration(
     assert order == ["put", "delete"]
 
 
-@pytest.mark.parametrize("newer", ["disconnected", "desktop", "failed poll"])
-async def test_command_response_older_than_push_or_poll_is_ignored(
-    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry, newer: str
+@pytest.mark.parametrize("relay_audio", [True, False])
+async def test_reconciling_read_after_a_command_wins(
+    hass: HomeAssistant,
+    relay: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    relay_audio: bool,
 ) -> None:
     await setup_entry(hass, config_entry)
     coordinator = config_entry.runtime_data
-    gate = asyncio.Event()
-
-    async def slow_media(**media):
-        await gate.wait()
-        return desktop_state(audio=False)
+    started, gate = asyncio.Event(), asyncio.Event()
+    answers = [desktop_state(audio=True), desktop_state(audio=relay_audio)]
 
     async def desktop():
-        if newer == "desktop":
-            return desktop_state(audio=True, inCall=True)
-        raise RelayError("relay returned 503: not connected")
+        started.set()
+        await gate.wait()
+        return answers.pop(0)
 
     with (
-        patch.object(coordinator.client, "set_media", side_effect=slow_media),
-        patch.object(coordinator.client, "desktop", side_effect=desktop),
+        patch.object(coordinator.client, "set_media", return_value=desktop_state(audio=False)),
+        patch.object(coordinator.client, "desktop", side_effect=desktop) as read,
     ):
-        task = hass.async_create_task(
-            hass.services.async_call(
-                "switch", "turn_off", {"entity_id": "switch.kumospace_microphone"}, blocking=True
-            )
+        # This read started before the command and answers with the old state.
+        coordinator.async_invalidate()
+        await started.wait()
+        await hass.services.async_call(
+            "switch", "turn_off", {"entity_id": "switch.kumospace_microphone"}, blocking=True
         )
-        await asyncio.sleep(0)
-        if newer == "disconnected":
-            coordinator.async_mark_disconnected()
-        elif newer == "desktop":
-            coordinator.async_apply(desktop_state(audio=True, inCall=True))
-        else:
-            await coordinator.async_refresh()
+        assert hass.states.get("switch.kumospace_microphone").state == "off"
         gate.set()
-        await task
-        await hass.async_block_till_done()
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert read.call_count == 2
     mic = hass.states.get("switch.kumospace_microphone").state
-    assert mic == ("on" if newer == "desktop" else STATE_UNAVAILABLE)
+    assert mic == ("on" if relay_audio else "off")
