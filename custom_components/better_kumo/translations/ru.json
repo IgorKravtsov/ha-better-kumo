@@ -1,0 +1,98 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Подключение к relay Better Kumo",
+        "description": "Вставьте ссылку для подключения со страницы relay **Pair a phone…** или введите адрес relay и секрет.",
+        "data": {
+          "link": "Ссылка для подключения",
+          "url": "Адрес relay",
+          "secret": "Секрет"
+        },
+        "data_description": {
+          "link": "kumowatch://relay?url=…&secret=…",
+          "url": "Адрес Tailscale работает и когда компьютер не дома."
+        }
+      }
+    },
+    "error": {
+      "missing_input": "Вставьте ссылку или введите и адрес relay, и секрет.",
+      "invalid_link": "Это не ссылка для подключения Better Kumo.",
+      "invalid_url": "Введите полный адрес, начинающийся с http или https.",
+      "invalid_auth": "Relay не принял секрет.",
+      "cannot_connect": "Не удалось подключиться к relay.",
+      "invalid_secret": "Секрет содержит недопустимые символы."
+    },
+    "abort": {
+      "already_configured": "Этот аккаунт Kumospace уже добавлен; адрес и секрет обновлены."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "poll_interval": "Интервал опроса",
+          "webhook_url": "Адрес Home Assistant для webhook"
+        },
+        "data_description": {
+          "poll_interval": "Как часто читать состояние из relay, в секундах (1–3600). Опрос работает и при работающих webhook.",
+          "webhook_url": "Необязательно. Relay пробует его первым, до внутреннего и внешнего адресов Home Assistant."
+        }
+      }
+    },
+    "error": {
+      "invalid_url": "Введите полный адрес, начинающийся с http или https.",
+      "invalid_interval": "Введите целое число секунд от 1 до 3600."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "in_call": {
+        "name": "В звонке"
+      },
+      "someone_in_earshot": {
+        "name": "Кто-то рядом слышен"
+      }
+    },
+    "select": {
+      "status_select": {
+        "name": "Статус",
+        "state": {
+          "available": "Доступен",
+          "away": "Отошёл",
+          "focusing": "Сосредоточен"
+        }
+      }
+    },
+    "sensor": {
+      "status": {
+        "name": "Статус",
+        "state": {
+          "available": "Доступен",
+          "away": "Отошёл",
+          "focusing": "Сосредоточен"
+        }
+      },
+      "room": {
+        "name": "Комната"
+      },
+      "earshot_count": {
+        "name": "Слышно людей",
+        "unit_of_measurement": "чел.",
+        "state_attributes": {
+          "names": {
+            "name": "Имена"
+          }
+        }
+      }
+    },
+    "switch": {
+      "microphone": {
+        "name": "Микрофон"
+      },
+      "camera": {
+        "name": "Камера"
+      }
+    }
+  }
+}

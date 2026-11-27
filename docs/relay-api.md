@@ -2,7 +2,8 @@
 
 This is the contract between this integration and the Better Kumo relay
 ([`better-kumo-app`](https://github.com/IgorKravtsov/better-kumo-app), crate `kumo-relay`, HTTP on port 8787).
-Parts marked **existing** are in the relay today; parts marked **new** are added by one PR in `better-kumo-app`.
+Parts marked **existing** were in the relay before; parts marked **new** come from
+[better-kumo-app#61](https://github.com/IgorKravtsov/better-kumo-app/pull/61), which this integration needs.
 The relay stays generic: it knows about webhooks and earshot, never about Home Assistant or its entities.
 
 ## Authentication (existing)
@@ -17,8 +18,10 @@ kumowatch://relay?url=<percent-encoded relay URL>&secret=<percent-encoded secret
 The config flow accepts this link (or a relay URL plus secret typed separately). Prefer the relay's Tailscale address,
 so polling and commands keep working when the laptop is away from home.
 
-**New:** the pairing page gets a **Copy link** button next to each QR code (today the link is only an
-"Open link on this device" anchor).
+The relay URL must point at the relay itself: the integration does not follow redirects (a redirect would resend
+the request body, which can carry the webhook secret), so a 3xx answer counts as an error.
+
+**New:** the pairing page has a **Copy link** button next to each QR code.
 
 ## Reading state
 
@@ -26,24 +29,26 @@ so polling and commands keep working when the laptop is away from home.
 
 Returns `DesktopState` (camelCase JSON): `floorId`, `floors`, `self` (`id`, `x`, `y`, `zoneId`, `availability`,
 `message`), `zones`, `people`, `audio`, `video`. `availability` is `available`, `away` or `focusing` (or null).
-Errors with 503-class responses when Kumospace desktop is not connected; the integration then marks entities
-unavailable.
+
+Errors are non-2xx answers:
+
+| Status | When |
+|---|---|
+| 503 | Kumospace desktop is not connected to the relay, or is connected but not in a space |
+| 404 | the relay runs with the desktop bridge disabled |
+
+The integration treats any error (and an unreachable relay) the same way: every entity becomes unavailable.
 
 **New fields:**
 
 | Field | Type | Meaning |
 |---|---|---|
-| `earshot` | `string[]` | ids (`people[].id`) of the people whose audio I currently hear, the same group the Meetings detector uses. Empty when nobody is in earshot. Must be available whether or not the Meetings module is installed. |
+| `earshot` | `string[]` | ids (`people[].id`) of the people whose audio I currently hear, the same group the Meetings detector uses. Empty when nobody is in earshot. Works whether or not the Meetings module is installed. |
 | `inCall` | `bool` | I am in an audio/video conversation (the same signal as `inCall` in the Meetings page tick). |
-| `call` | `{ "roomName": string, "peers": string[] } \| null` | the current Daily call without `url` and `token`. |
+| `call` | `{ "roomName": string, "peers": string[] } \| null` | the current Daily call; non-null while the desktop is in the call and while the call is handed off to a phone. It never contains the call's `url` or `token`. |
 
-Implementation note for the relay PR: today `earshot` and `inCall` come from the page tick that `kumo-meetings`
-reads. The PR moves that source (or a copy of it) so the relay has it without the Meetings module.
-
-### `GET /v1/events?boot=&after=&wait=` (existing)
-
-Long-poll over the office event log (`EventsPage { boot, latest, events[], desktopConnected }`). The integration
-uses it only as the source of `better_kumo_event` when webhooks are not delivered.
+Office events (`better_kumo_event`) are fired only from `event` webhook deliveries, so they need working webhooks;
+polling recovers desktop state only. The integration does not call `GET /v1/events`.
 
 ## Commands (existing)
 
@@ -51,15 +56,19 @@ uses it only as the source of `better_kumo_event` when webhooks are not delivere
 |---|---|
 | set status | `POST /v1/desktop/status` `{"availability":"available"\|"away"\|"focusing"}` |
 | microphone / camera | `POST /v1/desktop/media` `{"audio":bool}` / `{"video":bool}` |
-| go to a room | `POST /v1/desktop/zone` `{"zoneId":"…"}` |
 
-Each returns the new `DesktopState`; the integration applies it immediately.
+Each returns the new `DesktopState`; the integration applies it at once and then reads `GET /v1/desktop`, since
+the reply carries no revision to order it against other reads.
+
+- `POST /v1/desktop/status`: `message` is optional. Omitted keeps the current status message, `""` clears it.
+  The integration never sends it.
+- `POST /v1/desktop/media` works only during a call; otherwise it answers 503 `the desktop app is not in a call`.
 
 ## Webhooks (new)
 
 ### Register: `PUT /v1/webhooks/{id}`
 
-`id` is chosen by the client (the integration uses its config entry id), so re-registering is idempotent.
+`id` is chosen by the client; the integration uses its config entry id, so re-registering is idempotent.
 
 ```json
 {
@@ -69,19 +78,28 @@ Each returns the new `DesktopState`; the integration applies it immediately.
 }
 ```
 
+Answers `{"id": "…", "urls": […]}`. Limits (400 otherwise):
+
+- `id`: 1–64 characters, `[A-Za-z0-9_-]`.
+- `urls`: 1–8 `http://` or `https://` URLs with a host.
+- `secret`: 16–256 bytes of UTF-8. The HMAC key is those bytes, not the hex-decoded value.
+
+Behaviour:
+
 - `urls` is ordered. The relay delivers to the first URL that answers 2xx, remembers the one that worked and starts
   from it next time, and falls back through the list on failure.
 - The relay stores registrations on disk so they survive a restart. The integration also re-registers every
-  10 minutes and on startup.
-- `DELETE /v1/webhooks/{id}` removes it (called when the config entry is removed).
-- `GET /v1/webhooks` lists ids and URLs (never secrets), for debugging.
+  10 minutes and on startup. Re-registering an unchanged body changes nothing.
+- `DELETE /v1/webhooks/{id}` answers 204, also for an unknown id. The integration calls it when the config entry is
+  removed.
+- `GET /v1/webhooks` answers `[{"id": "…", "urls": […]}]` (never secrets), for debugging.
 
 ### Delivery
 
 `POST <url>` with `Content-Type: application/json` and
 
 ```
-X-Kumo-Signature: sha256=<hex HMAC-SHA256 of the raw body with the registration secret>
+X-Kumo-Signature: sha256=<hex HMAC-SHA256 of the raw body, keyed with the secret's UTF-8 bytes>
 ```
 
 Body:
@@ -92,14 +110,29 @@ Body:
 { "boot": "<relay boot id>", "seq": 44, "kind": "disconnected" }
 ```
 
-- `seq` increases by one per delivery within a `boot`; a new `boot` resets it. The receiver drops bodies with a bad
-  signature, and `desktop` bodies whose `seq` is not newer than the last applied one in the same `boot`.
-- `desktop` is sent when the state changes, debounced to 250 ms, and only if something the snapshot carries changed.
-  It never contains call `url` or `token`.
-- `disconnected` is sent when Kumospace desktop goes away; the integration marks entities unavailable.
-- Delivery is fire-and-forget with a short timeout (3 s). Missed deliveries are covered by polling.
+- `seq` is one counter per relay boot (`0 ≤ seq ≤ 2^64−1`), and a new `boot` restarts it. Every body goes to every
+  webhook with the same `seq`, so a gap means bodies this receiver did not get (dropped from a full queue or refused
+  by every URL), and a webhook registered later starts above 1. The integration drops bodies with a bad signature
+  or envelope and uses `(boot, seq)` only to fire a redelivered `event` once.
+- `desktop` and `disconnected` are signals for this integration: it ignores the snapshot in the body and reads
+  `GET /v1/desktop` right away (one extra LAN round trip; bodies that arrive while a read is in flight cause one
+  more read after it). Bodies and HTTP replies share no revision, so applying a delayed body could undo a newer
+  read. Availability comes from that read: a failed read makes entities unavailable. If Home Assistant cannot reach
+  the relay, pushes do not help, since polling fails too and entities stay unavailable.
+- `desktop` is sent when the snapshot changes. The relay reads the state 250 ms after an office frame, a
+  (dis)connect or a registration change, and otherwise about every 1.25 s, since Daily changes such as earshot and
+  the call send no office frame. Position-only changes (`x`/`y` of `self` or `people`) are not sent; any other
+  change is.
+- `disconnected` is sent when the state can no longer be read after a `desktop` was sent: Kumospace desktop went
+  away, or runs but is not in a space (the same cases where `GET /v1/desktop` answers 503).
+- At relay start and after a new or changed registration, the relay sends the current `desktop` or
+  `disconnected` on its next read, to every registered webhook.
+- `event` is sent for every entry the relay's event log records.
+- Delivery is fire-and-forget: 3 s timeout per URL attempt, redirects are not followed (the webhook URL must be the
+  final address), and each webhook has a queue of 64 bodies; when it is full, new bodies are dropped. Missed
+  `desktop` deliveries are covered by polling; missed `event` deliveries are lost.
 
 ## Polling
 
 The integration polls `GET /v1/desktop` on a configurable interval (1–3600 s, default 30 s) whether or not webhooks
-work. If the relay is unreachable, every entity becomes unavailable.
+work. If the relay is unreachable or answers an error, every entity becomes unavailable.

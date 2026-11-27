@@ -1,0 +1,98 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Підключення до relay Better Kumo",
+        "description": "Вставте посилання для підключення зі сторінки relay **Pair a phone…** або введіть адресу relay і секрет.",
+        "data": {
+          "link": "Посилання для підключення",
+          "url": "Адреса relay",
+          "secret": "Секрет"
+        },
+        "data_description": {
+          "link": "kumowatch://relay?url=…&secret=…",
+          "url": "Адреса Tailscale працює й коли комп'ютер не вдома."
+        }
+      }
+    },
+    "error": {
+      "missing_input": "Вставте посилання або введіть і адресу relay, і секрет.",
+      "invalid_link": "Це не посилання для підключення Better Kumo.",
+      "invalid_url": "Введіть повну адресу, що починається з http або https.",
+      "invalid_auth": "Relay не прийняв секрет.",
+      "cannot_connect": "Не вдалося підключитися до relay.",
+      "invalid_secret": "Секрет містить неприпустимі символи."
+    },
+    "abort": {
+      "already_configured": "Цей акаунт Kumospace вже додано; адресу й секрет оновлено."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "poll_interval": "Інтервал опитування",
+          "webhook_url": "Адреса Home Assistant для webhook"
+        },
+        "data_description": {
+          "poll_interval": "Як часто читати стан із relay, у секундах (1–3600). Опитування працює й коли webhook працюють.",
+          "webhook_url": "Необов'язково. Relay пробує її першою, до внутрішньої та зовнішньої адрес Home Assistant."
+        }
+      }
+    },
+    "error": {
+      "invalid_url": "Введіть повну адресу, що починається з http або https.",
+      "invalid_interval": "Введіть ціле число секунд від 1 до 3600."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "in_call": {
+        "name": "У дзвінку"
+      },
+      "someone_in_earshot": {
+        "name": "Когось чути поруч"
+      }
+    },
+    "select": {
+      "status_select": {
+        "name": "Статус",
+        "state": {
+          "available": "Доступний",
+          "away": "Відійшов",
+          "focusing": "Зосереджений"
+        }
+      }
+    },
+    "sensor": {
+      "status": {
+        "name": "Статус",
+        "state": {
+          "available": "Доступний",
+          "away": "Відійшов",
+          "focusing": "Зосереджений"
+        }
+      },
+      "room": {
+        "name": "Кімната"
+      },
+      "earshot_count": {
+        "name": "Чути людей",
+        "unit_of_measurement": "осіб",
+        "state_attributes": {
+          "names": {
+            "name": "Імена"
+          }
+        }
+      }
+    },
+    "switch": {
+      "microphone": {
+        "name": "Мікрофон"
+      },
+      "camera": {
+        "name": "Камера"
+      }
+    }
+  }
+}

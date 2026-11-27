@@ -1,0 +1,13 @@
+{
+  "domain": "better_kumo",
+  "name": "Better Kumo",
+  "codeowners": ["@IgorKravtsov"],
+  "config_flow": true,
+  "dependencies": ["webhook"],
+  "documentation": "https://github.com/IgorKravtsov/ha-better-kumo",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/IgorKravtsov/ha-better-kumo/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
