@@ -107,7 +107,6 @@ def relay_status(status: dict[str, Any]) -> RelayStatus:
     phone_seconds = _seconds(phone)
     return RelayStatus(
         idle_seconds=idle_seconds(status),
-        # null means no phone has reported since the relay started; absent means an older relay.
         phone_known="phone_idle_seconds" in status and (phone is None or phone_seconds is not None),
         phone_idle_seconds=phone_seconds,
     )

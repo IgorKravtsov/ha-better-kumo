@@ -18,7 +18,7 @@
       "room": { "default": "mdi:door" },
       "earshot_count": { "default": "mdi:account-voice" },
       "idle_time": { "default": "mdi:timer-sand" },
-      "phone_idle_time": { "default": "mdi:cellphone-clock" }
+      "phone_idle_time": { "default": "mdi:cellphone-information" }
     },
     "switch": {
       "microphone": { "default": "mdi:microphone-off", "state": { "on": "mdi:microphone" } },

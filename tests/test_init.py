@@ -194,14 +194,11 @@ async def test_using_phone_follows_phone_idle_time_and_option(
     for status, state in (
         (relay_status(phone_idle_seconds=60), "off"),
         (relay_status(phone_idle_seconds=0), "on"),
-        # No phone has reported since the relay started: not using the phone.
         (relay_status(phone_idle_seconds=None), "off"),
-        # A relay older than better-kumo-app#70 can't tell.
         (absent, "unknown"),
         (relay_status(phone_idle_seconds=-1), "unknown"),
         (relay_status(phone_idle_seconds=True), "unknown"),
         (relay_status(phone_idle_seconds="5"), "unknown"),
-        # Independent of the computer's idle time.
         (relay_status(idle_seconds=None, phone_idle_seconds=1), "on"),
     ):
         answer(status)
