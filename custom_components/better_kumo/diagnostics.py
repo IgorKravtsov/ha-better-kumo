@@ -40,7 +40,7 @@ async def async_get_config_entry_diagnostics(
         "desktop": async_redact_data(coordinator.data, DESKTOP_REDACT)
         if coordinator.last_update_success and coordinator.data
         else None,
-        "status_ok": status.last_update_success,
+        "status_ok": status.last_update_success if status.has_read else None,
         "status_error": None if status.last_update_success else str(status.last_exception),
         "idle_seconds": status.data if status.last_update_success else None,
     }

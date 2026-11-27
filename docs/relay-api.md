@@ -40,7 +40,7 @@ reads it on its own, independently of `GET /v1/desktop`, for one field:
 ```
 
 `GET /v1/status` answers whether or not Kumospace desktop is connected, so the **At computer** entity depends only
-on it: unavailable when it fails, unknown when `idle_seconds` is `null`, absent or not a non-negative integer, else
+on it: unavailable when it fails, unknown when `idle_seconds` is `null`, absent or not an integer from 0 to 2^64 − 1, else
 on when `idle_seconds` is below the **Away after idle** option. `idle_seconds` is never in webhook deliveries (it
 changes every second), so it updates only on reads.
 

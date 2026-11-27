@@ -79,7 +79,7 @@ def is_desktop_state(state: Any) -> bool:
 def idle_seconds(status: dict[str, Any]) -> int | None:
     """Seconds since the last input on the relay's computer; None when unknown."""
     value = status.get("idle_seconds")
-    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+    if isinstance(value, int) and not isinstance(value, bool) and 0 <= value < 2**64:
         return value
     return None
 

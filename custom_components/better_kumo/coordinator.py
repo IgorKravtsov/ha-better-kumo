@@ -111,6 +111,8 @@ class StatusCoordinator(DataUpdateCoordinator[int | None]):
         )
         self.client = client
         self._read_lock = asyncio.Lock()
+        # HA starts with last_update_success True, and the first read runs after setup.
+        self.has_read = False
 
     async def _async_update_data(self) -> int | None:
         # HA 2025.8 does not serialize polls with async_refresh; an older sample must not land last.
@@ -119,3 +121,5 @@ class StatusCoordinator(DataUpdateCoordinator[int | None]):
                 return idle_seconds(await self.client.status())
             except RelayError as err:
                 raise UpdateFailed(str(err)) from err
+            finally:
+                self.has_read = True

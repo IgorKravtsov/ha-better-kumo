@@ -19,7 +19,7 @@ from pytest_homeassistant_custom_component.components.diagnostics import (
 )
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
-from custom_components.better_kumo.api import RelayError, is_desktop_state
+from custom_components.better_kumo.api import RelayError, idle_seconds, is_desktop_state
 from custom_components.better_kumo.const import (
     CONF_AWAY_AFTER,
     CONF_POLL_INTERVAL,
@@ -632,7 +632,10 @@ async def test_diagnostics_after_failed_reads(
 
 
 async def test_stalled_status_does_not_delay_setup(
-    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+    hass: HomeAssistant,
+    hass_client,
+    relay: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
 ) -> None:
     gate = asyncio.Event()
 
@@ -647,9 +650,13 @@ async def test_stalled_status_does_not_delay_setup(
         assert hass.states.get("sensor.kumospace_status").state == "available"
         assert any(c[0] == "PUT" for c in relay.mock_calls)
         assert hass.states.get(AT_COMPUTER).state == "unknown"
+        diag = await get_diagnostics_for_config_entry(hass, hass_client, config_entry)
+        assert diag["status_ok"] is None
         gate.set()
         await hass.async_block_till_done(wait_background_tasks=True)
     assert hass.states.get(AT_COMPUTER).state == "on"
+    diag = await get_diagnostics_for_config_entry(hass, hass_client, config_entry)
+    assert diag["status_ok"] is True
 
 
 async def test_overlapping_status_reads_are_serialized(
@@ -674,3 +681,9 @@ async def test_overlapping_status_reads_are_serialized(
         gate.set()
         await asyncio.gather(first, second)
     assert started == [0, 1]
+
+
+def test_idle_seconds_rejects_values_too_long_for_a_state() -> None:
+    assert idle_seconds({"idle_seconds": 2**64 - 1}) == 2**64 - 1
+    assert idle_seconds({"idle_seconds": 2**64}) is None
+    assert idle_seconds({"idle_seconds": int("9" * 300)}) is None
