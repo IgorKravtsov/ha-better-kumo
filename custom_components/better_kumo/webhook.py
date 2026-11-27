@@ -16,6 +16,7 @@ from aiohttp import web
 from homeassistant.components import webhook
 from homeassistant.const import CONF_WEBHOOK_ID
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 
@@ -26,6 +27,7 @@ from .const import (
     DOMAIN,
     EVENT_BETTER_KUMO,
     REGISTER_INTERVAL,
+    signal_event,
 )
 from .coordinator import BetterKumoConfigEntry, BetterKumoCoordinator
 
@@ -183,3 +185,4 @@ class WebhookReceiver:
             self.hass.bus.async_fire(
                 EVENT_BETTER_KUMO, {**payload["event"], "config_entry_id": self.entry.entry_id}
             )
+            async_dispatcher_send(self.hass, signal_event(self.entry.entry_id), payload["event"])

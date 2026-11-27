@@ -54,6 +54,93 @@
         "name": "Someone in earshot"
       }
     },
+    "event": {
+      "messages": {
+        "name": "Messages",
+        "state_attributes": {
+          "event_type": {
+            "name": "Event type",
+            "state": {
+              "message": "Message"
+            }
+          },
+          "sender": {
+            "name": "Sender"
+          },
+          "sender_id": {
+            "name": "Sender ID"
+          },
+          "chat": {
+            "name": "Chat"
+          },
+          "text": {
+            "name": "Text"
+          },
+          "channel": {
+            "name": "Channel"
+          },
+          "channel_type": {
+            "name": "Channel type"
+          },
+          "mentions_me": {
+            "name": "Mentions me"
+          },
+          "thread": {
+            "name": "In a thread"
+          },
+          "at": {
+            "name": "Time"
+          }
+        }
+      },
+      "office_events": {
+        "name": "Office events",
+        "state_attributes": {
+          "event_type": {
+            "name": "Event type",
+            "state": {
+              "nudge": "Nudge",
+              "knock": "Knock",
+              "entered_room": "Entered a room",
+              "left_room": "Left a room",
+              "joined_floor": "Joined a floor",
+              "online": "Online",
+              "offline": "Offline",
+              "status": "Status changed",
+              "nearby_chat": "Nearby chat",
+              "other": "Other"
+            }
+          },
+          "kind": {
+            "name": "Kind"
+          },
+          "person": {
+            "name": "Person"
+          },
+          "person_id": {
+            "name": "Person ID"
+          },
+          "room": {
+            "name": "Room"
+          },
+          "floor": {
+            "name": "Floor"
+          },
+          "status": {
+            "name": "Status"
+          },
+          "chat": {
+            "name": "Chat"
+          },
+          "text": {
+            "name": "Text"
+          },
+          "at": {
+            "name": "Time"
+          }
+        }
+      }
+    },
     "select": {
       "status_select": {
         "name": "Status",

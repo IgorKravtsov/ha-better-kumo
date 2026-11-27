@@ -13,6 +13,7 @@ from .webhook import WebhookReceiver
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,
+    Platform.EVENT,
     Platform.SELECT,
     Platform.SENSOR,
     Platform.SWITCH,
