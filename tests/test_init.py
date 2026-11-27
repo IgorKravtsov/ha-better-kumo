@@ -608,7 +608,7 @@ async def test_diagnostics_after_failed_reads(
     assert diag["last_update_success"] is True
     assert diag["desktop"] is not None
     assert diag["status_ok"] is False
-    assert diag["status_error"] == "wrong relay secret"
+    assert diag["status_error"] == "Reading the relay status failed: wrong relay secret (HTTP 401)"
     assert diag["idle_seconds"] is None
 
     aioclient_mock.clear_requests()

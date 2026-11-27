@@ -85,6 +85,25 @@ the reply carries no revision to order it against other reads.
   The integration never sends it.
 - `POST /v1/desktop/media` works only during a call; otherwise it answers 503 `the desktop app is not in a call`.
 
+## Error messages
+
+The integration never reads the body of an error answer, so neither the relay's reason text nor a proxy's error
+page reaches error messages, logs or diagnostics. Each message is built from the action, the HTTP status and fixed
+text, for example `Turning the microphone on failed: Kumospace desktop is not in a call (HTTP 503)`:
+
+| Status | Desktop reads and status | Microphone / camera | Other endpoints |
+|---|---|---|---|
+| 503 | Kumospace desktop is not connected to the relay, or not in a space | Kumospace desktop is not in a call | the relay is temporarily unavailable |
+| 404 | the relay runs with the desktop bridge disabled | same | the relay does not know this endpoint; update the relay |
+| 401 | wrong relay secret | same | same |
+| 400 | the relay rejected the request as invalid | same | same |
+| 3xx | the relay answered with a redirect; use the relay's own address | same | same |
+| other | the relay answered with an error | same | same |
+
+Replies that are not UTF-8, not JSON or not the expected shape get a fixed `unexpected reply from the relay`
+message. Connection failures keep aiohttp's text (host and OS error); other aiohttp errors, which can quote a
+malformed reply, show only the error type.
+
 ## Webhooks (new)
 
 ### Register: `PUT /v1/webhooks/{id}`
