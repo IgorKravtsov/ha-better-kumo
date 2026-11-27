@@ -43,24 +43,28 @@ class BetterKumoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.generation = 0
         self._stale = False
         self._reader: asyncio.Task[None] | None = None
+        self._read_lock = asyncio.Lock()
+        self.command_lock = asyncio.Lock()
         self.receiver: WebhookReceiver | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
-        # Reads are serialized, so this one sees every change signalled before it started.
-        self._stale = False
-        generation = self.generation
-        try:
-            data = await self.client.desktop()
-        except RelayError as err:
-            if generation != self.generation and self.last_update_success:
+        # HA 2025.8 does not serialize scheduled polls with async_refresh.
+        async with self._read_lock:
+            # This read sees every change signalled before it started.
+            self._stale = False
+            generation = self.generation
+            try:
+                data = await self.client.desktop()
+            except RelayError as err:
+                if generation != self.generation and self.last_update_success:
+                    return self.data
+                raise UpdateFailed(str(err)) from err
+            # A command reply landed while this read was in flight; the read may predate it.
+            if generation != self.generation:
+                if not self.last_update_success:
+                    raise UpdateFailed(str(self.last_exception))
                 return self.data
-            raise UpdateFailed(str(err)) from err
-        # A command reply landed while this read was in flight; the read may predate it.
-        if generation != self.generation:
-            if not self.last_update_success:
-                raise UpdateFailed(str(self.last_exception))
-            return self.data
-        return data
+            return data
 
     @callback
     def async_apply(self, data: dict[str, Any]) -> None:

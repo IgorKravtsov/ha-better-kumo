@@ -47,7 +47,9 @@ class BetterKumoEntity(CoordinatorEntity[BetterKumoCoordinator]):
 
     async def _command(self, request: Awaitable[dict[str, Any]]) -> None:
         try:
-            self.coordinator.async_apply(await request)
+            # Each reply is a full snapshot, so an older one must not land after a newer one.
+            async with self.coordinator.command_lock:
+                self.coordinator.async_apply(await request)
         except RelayError as err:
             raise HomeAssistantError(f"Better Kumo relay: {err}") from err
         finally:

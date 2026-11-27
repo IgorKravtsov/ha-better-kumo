@@ -311,6 +311,79 @@ async def test_reconciling_read_after_a_command_wins(
     assert mic == ("on" if relay_audio else "off")
 
 
-def test_person_id_must_be_a_string() -> None:
+def test_desktop_state_shape() -> None:
     assert is_desktop_state(desktop_state())
+    assert is_desktop_state(desktop_state(inCall=None))
     assert not is_desktop_state(desktop_state(people=[{"id": ["p2"]}]))
+    for key in ("inCall", "audio", "video"):
+        assert not is_desktop_state(desktop_state(**{key: "false"}))
+        assert not is_desktop_state(desktop_state(**{key: 0}))
+
+
+async def test_overlapping_reads_are_serialized(
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    await setup_entry(hass, config_entry)
+    coordinator = config_entry.runtime_data
+    started, gate = asyncio.Event(), asyncio.Event()
+    answers = [desktop_state(inCall=False), desktop_state(inCall=True)]
+
+    async def desktop():
+        started.set()
+        await gate.wait()
+        return answers.pop(0)
+
+    with patch.object(coordinator.client, "desktop", side_effect=desktop) as read:
+        # The scheduled-poll path of HA 2025.8, which takes no lock.
+        first = hass.async_create_task(coordinator._async_refresh())
+        await started.wait()
+        second = hass.async_create_task(coordinator._async_refresh())
+        await asyncio.sleep(0)
+        assert read.call_count == 1
+        gate.set()
+        await first
+        await second
+    assert read.call_count == 2
+    assert hass.states.get("binary_sensor.kumospace_in_a_call").state == "on"
+
+
+async def test_commands_apply_replies_in_order(
+    hass: HomeAssistant, relay: AiohttpClientMocker, config_entry: MockConfigEntry
+) -> None:
+    await setup_entry(hass, config_entry)
+    client = config_entry.runtime_data.client
+    started, gate = asyncio.Event(), asyncio.Event()
+
+    async def slow_media(**media):
+        started.set()
+        await gate.wait()
+        return desktop_state(audio=False)
+
+    away = desktop_state(audio=False)
+    away["self"] = {**away["self"], "availability": "away"}
+    with (
+        patch.object(client, "set_media", side_effect=slow_media),
+        patch.object(client, "set_availability", return_value=away) as status,
+        patch.object(client, "desktop", return_value=away),
+    ):
+        mic = hass.async_create_task(
+            hass.services.async_call(
+                "switch", "turn_off", {"entity_id": "switch.kumospace_microphone"}, blocking=True
+            )
+        )
+        await started.wait()
+        select = hass.async_create_task(
+            hass.services.async_call(
+                "select",
+                "select_option",
+                {"entity_id": "select.kumospace_status", "option": "away"},
+                blocking=True,
+            )
+        )
+        await asyncio.sleep(0)
+        status.assert_not_awaited()
+        gate.set()
+        await mic
+        await select
+        assert hass.states.get("sensor.kumospace_status").state == "away"
+        await hass.async_block_till_done(wait_background_tasks=True)
